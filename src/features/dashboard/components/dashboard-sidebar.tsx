@@ -2,6 +2,8 @@
 
 import Image from "next/image";
 import { usePathname } from "next/navigation";
+import logoIcon from "@/assets/koegairu-favicon.ico";
+import logoFull from "@/assets/koegairu-app-logo-title-horizontal.png";
 
 import {
   Sidebar,
@@ -16,6 +18,7 @@ import {
   SidebarMenuItem,
   SidebarRail,
   SidebarTrigger,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { 
@@ -33,7 +36,6 @@ import {
   Headphones,
 } from "lucide-react";
 import Link from "next/link";
-// import { useState } from "react";
 
 interface MenuItem {
   title: string;
@@ -47,6 +49,11 @@ interface NavSectionProps {
   items: MenuItem[];
   pathname: string;
 };
+
+const logoImages = [
+  {src: logoIcon, alt: "KoeGaIru Logo", width: 24, height: 24, className: "rounded-sm"},
+  {src: logoFull, alt: "KoeGaIru Logo", width: 120, height: 24, className: "rounded-sm object-contain"}
+]
 
 function NavSection({ label, items, pathname }: NavSectionProps) {
   return (
@@ -96,7 +103,10 @@ function NavSection({ label, items, pathname }: NavSectionProps) {
 export function DashboardSidebar() {
   const pathname = usePathname();
   const clerk = useClerk();
+  const { state } = useSidebar();
   // const [voiceDialogOpen, setVoiceDialogOpen] = useState(false);
+
+  const activeLogoImage = state === "collapsed" ? logoImages[0] : logoImages[1];
 
   const mainMenuItems: MenuItem[] = [
     {
@@ -141,15 +151,15 @@ export function DashboardSidebar() {
         <div 
         className="flex items-center gap-2 pl-1 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:pl-0">
           <Image
-            src="/logo.svg"
-            alt="KoeGaIru"
-            width={24}
-            height={24}
-            className="rounded-sm"
+            src={activeLogoImage.src}
+            alt={activeLogoImage.alt}
+            width={activeLogoImage.width}
+            height={activeLogoImage.height}
+            className={activeLogoImage.className}
           />
-          <span className="group-data-[collapsible=icon]:hidden font-semibold text-lg tracking-tighter text-foreground">
+          {/* <span className="group-data-[collapsible=icon]:hidden font-semibold text-lg tracking-tighter text-foreground">
             KoeGaIru
-          </span>
+          </span> */}
           <SidebarTrigger className="ml-auto lg:hidden" />
         </div>
         <SidebarMenu>
