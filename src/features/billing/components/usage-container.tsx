@@ -23,7 +23,7 @@ function UpgradeCard() {
           Pay as you go
         </p>
         <p className="text-xs text-muted-foreground mt-1">
-          Generate speech starting at $0.30 per 1,000 characters
+          Generate speech starting at ₱20.00 per 1,000 characters
         </p>
       </div>
       <Button
