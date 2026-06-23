@@ -69,7 +69,7 @@ export function TextInputPanel() {
               <Coins className="size-3 text-chart-5" />
               <span className="text-xs">
                 <span className="tabular-nums">
-                  ${(text.length * COST_PER_UNIT).toFixed(4)}
+                  ₱{(text.length * COST_PER_UNIT).toFixed(4)}
                 </span>&nbsp;
                 estimated
               </span>
