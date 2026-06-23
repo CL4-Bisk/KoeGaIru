@@ -118,6 +118,11 @@ export function DashboardSidebar() {
       icon: Home,
     },
     {
+      title: "Create voice project",
+      url: "/projects",
+      icon: AudioLines,
+    },
+    {
       title: "Explore voices",
       url: "/voices",
       icon: LayoutGrid,
