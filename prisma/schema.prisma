@@ -45,7 +45,8 @@ model Voice {
   variant     VoiceVariant
   r2ObjectKey String?
 
-  generations Generation[]
+  generations   Generation[]
+  projectBlocks ProjectBlock[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -70,9 +71,50 @@ model Generation {
   topK              Int
   repetitionPenalty Float
 
+  projectBlocks ProjectBlock[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([orgId])
   @@index([voiceId])
+}
+
+model Project {
+  id String @id @default(cuid())
+
+  orgId String
+
+  name        String
+  description String?
+
+  blocks ProjectBlock[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orgId])
+}
+
+model ProjectBlock {
+  id String @id @default(cuid())
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  order Int
+
+  text    String
+  voiceId String?
+  voice   Voice?  @relation(fields: [voiceId], references: [id], onDelete: SetNull)
+
+  generationId String?
+  generation   Generation? @relation(fields: [generationId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId])
+  @@index([voiceId])
+  @@index([generationId])
 }
