@@ -1,6 +1,7 @@
-// src/app/(dashboard)/projects/[projectId]/page.tsx
-import { ProjectDetailView } from "@/features/projects/views/projects-detail-view";
-import { HydrateClient, prefetch, trpc } from "@/trpc/server";
+"use client";
+
+import { useSuspenseQuery } from "@tanstack/react-query";
+import { useTRPC } from "@/trpc/client";
 
 // const demoBlocks = [
 //   {
@@ -20,20 +21,27 @@ import { HydrateClient, prefetch, trpc } from "@/trpc/server";
 //   },
 // ];
 
-export default async function ProjectBasePage({
-  params,
-}: {
-  params: Promise<{ projectId: string }>;
-}) {
-  const { projectId } = await params;
+export function ProjectDetailView({ projectId }: { projectId: string }) {
+  const trpc = useTRPC();
 
-  prefetch(trpc.projects.getById.queryOptions({ id: projectId }));
+  const { data: project } = useSuspenseQuery(
+    trpc.projects.getById.queryOptions({ id: projectId }),
+  );
 
   return (
-    <HydrateClient>
-      <ProjectDetailView projectId={projectId} />
-    </HydrateClient>
+    <div className="flex flex-1 flex-col gap-6 p-6">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">
+          {project.name}
+        </h1>
 
+        {project.description && (
+          <p className="text-sm text-muted-foreground">
+            {project.description}
+          </p>
+        )}
+      </div>
+    </div>
     // <div className="flex flex-1 flex-col gap-6 p-6">
     //   <div>
     //     <p className="text-sm text-muted-foreground">Project / {projectId}</p>

@@ -34,6 +34,7 @@ import {
   Volume2,
   Settings,
   Headphones,
+  FolderKanban,
 } from "lucide-react";
 import Link from "next/link";
 import { UsageContainer } from "@/features/billing/components/usage-container";
@@ -118,9 +119,9 @@ export function DashboardSidebar() {
       icon: Home,
     },
     {
-      title: "Create voice project",
+      title: "View voice projects",
       url: "/projects",
-      icon: AudioLines,
+      icon: FolderKanban,
     },
     {
       title: "Explore voices",
