@@ -2,6 +2,7 @@
 
 import {
   type FormEvent,
+  type KeyboardEvent,
   type PointerEvent,
   useEffect,
   useRef,
@@ -33,6 +34,7 @@ import {
   useOthers,
   useUpdateMyPresence,
 } from "@/features/collaborative-audio/lib/realtime";
+import { ProjectBlockSettingsPanel } from "@/features/projects/components/project-block-settings-panel";
 import { useTRPC } from "@/trpc/client";
 
 // const demoBlocks = [
@@ -70,11 +72,19 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
   const [editingRevision, setEditingRevision] = useState<number | null>(null);
+  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const editingBlockIdRef = useRef<string | null>(null);
 
   const { data: project } = useSuspenseQuery(
     trpc.projects.getById.queryOptions({ id: projectId }),
   );
+
+  const { data: voices } = useSuspenseQuery(
+    trpc.voices.getAll.queryOptions(),
+  );
+
+  const selectedBlock =
+    project.blocks.find((block) => block.id === selectedBlockId) ?? null;
 
   const invalidateProject = () =>
     queryClient.invalidateQueries({
@@ -83,8 +93,10 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
 
   const createBlock = useMutation(
     trpc.projects.createBlock.mutationOptions({
-      onSuccess: async () => {
+      onSuccess: async (createdBlock) => {
         setText("");
+        setSelectedBlockId(createdBlock.id);
+        updateMyPresence({ selectedBlockId: createdBlock.id });
         await invalidateProject();
         toast.success("Text block added");
       },
@@ -106,6 +118,33 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
         toast.success("Text block updated");
       },
       onError: (error) => {
+        toast.error(error.message);
+      },
+    }),
+  );
+
+  const updateBlockVoice = useMutation(
+    trpc.projects.updateBlockVoice.mutationOptions({
+      onSuccess: async (updatedBlock) => {
+        setEditingRevision(updatedBlock.revision);
+        await invalidateProject();
+        toast.success("Block voice updated");
+      },
+      onError: (error) => {
+        toast.error(error.message);
+      },
+    }),
+  );
+
+  const generateBlockAudio = useMutation(
+    trpc.projects.generateBlockAudio.mutationOptions({
+      onSuccess: async (updatedBlock) => {
+        setEditingRevision(updatedBlock.revision);
+        await invalidateProject();
+        toast.success("Block audio generated");
+      },
+      onError: async (error) => {
+        await invalidateProject();
         toast.error(error.message);
       },
     }),
@@ -154,6 +193,10 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
           setEditingBlockId(null);
           setEditingText("");
           setEditingRevision(null);
+        }
+
+        if (selectedBlockId === variables.blockId) {
+          setSelectedBlockId(null);
         }
 
         await invalidateProject();
@@ -238,12 +281,39 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
     });
   };
 
+  const handleSelectBlock = (blockId: string) => {
+    setSelectedBlockId(blockId);
+    updateMyPresence({ selectedBlockId: blockId });
+  };
+
+  const handleBlockKeyDown = (
+    event: KeyboardEvent<HTMLDivElement>,
+    blockId: string,
+  ) => {
+    if (event.currentTarget !== event.target) {
+      return;
+    }
+
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      handleSelectBlock(blockId);
+    }
+  };
+
   const handleDeleteBlock = (blockId: string) => {
     if (!window.confirm("Delete this text block?")) {
       return;
     }
 
     deleteBlock.mutate({ blockId });
+  };
+
+  const handleUpdateBlockVoice = (blockId: string, voiceId: string) => {
+    updateBlockVoice.mutate({ blockId, voiceId });
+  };
+
+  const handleGenerateBlockAudio = (blockId: string) => {
+    generateBlockAudio.mutate({ blockId });
   };
 
   const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
@@ -258,6 +328,14 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
   const handlePointerLeave = () => {
     updateMyPresence({ cursor: null });
   };
+
+  const isBlockActionPending =
+    acquireBlockLock.isPending ||
+    updateBlock.isPending ||
+    updateBlockVoice.isPending ||
+    generateBlockAudio.isPending ||
+    deleteBlock.isPending ||
+    releaseBlockLock.isPending;
 
   return (
     <div
@@ -318,100 +396,139 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
           <EmptyContent />
         </Empty>
       ) : (
-        <div className="grid gap-3">
-          {project.blocks.map((block, index) => {
-            const isEditing = editingBlockId === block.id;
-            const otherEditingUser = others.find(
-              (user) => user.presence.editingBlockId === block.id,
-            );
-            const isBusy =
-              acquireBlockLock.isPending ||
-              updateBlock.isPending ||
-              deleteBlock.isPending ||
-              releaseBlockLock.isPending;
+        <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
+          <div className="grid gap-3">
+            {project.blocks.map((block, index) => {
+              const isEditing = editingBlockId === block.id;
+              const isSelected = selectedBlockId === block.id;
+              const otherEditingUser = others.find(
+                (user) => user.presence.editingBlockId === block.id,
+              );
 
-            return (
-              <div
-                key={block.id}
-                className="rounded-lg border bg-background p-5 shadow-sm"
-                onClick={() =>
-                  updateMyPresence({ selectedBlockId: block.id })
-                }
-              >
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm font-medium">Block {index + 1}</p>
-                    <Badge variant="outline">Text</Badge>
-                    {otherEditingUser && (
-                      <Badge variant="secondary">
-                        {otherEditingUser.info?.name ?? "Someone"} is editing
-                      </Badge>
-                    )}
-                  </div>
+              return (
+                <div
+                  key={block.id}
+                  role="button"
+                  tabIndex={0}
+                  className={`rounded-lg border bg-background p-5 shadow-sm transition-colors ${
+                    isSelected ? "border-primary/70 bg-primary/5" : ""
+                  }`}
+                  onClick={() => handleSelectBlock(block.id)}
+                  onKeyDown={(event) => handleBlockKeyDown(event, block.id)}
+                >
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-medium">Block {index + 1}</p>
+                      <Badge variant="outline">Text</Badge>
+                      <Badge variant="secondary">{block.status}</Badge>
+                      {block.generation && (
+                        <Badge variant="outline">Audio ready</Badge>
+                      )}
+                      {otherEditingUser && (
+                        <Badge variant="secondary">
+                          {otherEditingUser.info?.name ?? "Someone"} is editing
+                        </Badge>
+                      )}
+                    </div>
 
-                  <div className="flex items-center gap-1">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      disabled={isBusy}
-                      onClick={() =>
-                        handleStartEdit(block.id, block.text, block.revision)
-                      }
-                    >
-                      <Pencil className="size-4" />
-                      <span className="sr-only">Edit block</span>
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      disabled={isBusy}
-                      onClick={() => handleDeleteBlock(block.id)}
-                    >
-                      <Trash2 className="size-4" />
-                      <span className="sr-only">Delete block</span>
-                    </Button>
-                  </div>
-                </div>
-
-                {isEditing ? (
-                  <form
-                    onSubmit={(event) => handleUpdateBlock(event, block.id)}
-                    className="flex flex-col gap-3"
-                  >
-                    <Textarea
-                      value={editingText}
-                      onChange={(event) => setEditingText(event.target.value)}
-                      className="min-h-24"
-                    />
-                    <div className="flex justify-end gap-2">
+                    <div className="flex items-center gap-1">
                       <Button
                         type="button"
-                        variant="outline"
-                        disabled={updateBlock.isPending}
-                        onClick={handleCancelEdit}
+                        variant="ghost"
+                        size="icon-sm"
+                        disabled={isBlockActionPending}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleStartEdit(block.id, block.text, block.revision);
+                        }}
                       >
-                        <X className="size-4" />
-                        Cancel
+                        <Pencil className="size-4" />
+                        <span className="sr-only">Edit block</span>
                       </Button>
                       <Button
-                        type="submit"
-                        disabled={updateBlock.isPending || !editingText.trim()}
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        disabled={isBlockActionPending}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleDeleteBlock(block.id);
+                        }}
                       >
-                        <Save className="size-4" />
-                        {updateBlock.isPending ? "Saving..." : "Save"}
+                        <Trash2 className="size-4" />
+                        <span className="sr-only">Delete block</span>
                       </Button>
                     </div>
-                  </form>
-                ) : (
-                  <p className="whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
-                    {block.text}
-                  </p>
-                )}
-              </div>
-            );
-          })}
+                  </div>
+
+                  {isEditing ? (
+                    <form
+                      onSubmit={(event) => handleUpdateBlock(event, block.id)}
+                      className="flex flex-col gap-3"
+                    >
+                      <Textarea
+                        value={editingText}
+                        onChange={(event) => setEditingText(event.target.value)}
+                        className="min-h-24"
+                      />
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={updateBlock.isPending}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleCancelEdit();
+                          }}
+                        >
+                          <X className="size-4" />
+                          Cancel
+                        </Button>
+                        <Button
+                          type="submit"
+                          disabled={updateBlock.isPending || !editingText.trim()}
+                        >
+                          <Save className="size-4" />
+                          {updateBlock.isPending ? "Saving..." : "Save"}
+                        </Button>
+                      </div>
+                    </form>
+                  ) : (
+                    <div className="flex flex-col gap-3">
+                      <p className="whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
+                        {block.text}
+                      </p>
+                      {block.generation && (
+                        <audio
+                          controls
+                          preload="metadata"
+                          src={block.generation.audioUrl}
+                          className="w-full"
+                          onClick={(event) => event.stopPropagation()}
+                        />
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <ProjectBlockSettingsPanel
+            project={project}
+            selectedBlock={selectedBlock}
+            voices={voices}
+            isEditingSelectedBlock={
+              selectedBlock ? editingBlockId === selectedBlock.id : false
+            }
+            isBusy={isBlockActionPending}
+            onStartEdit={(block) =>
+              handleStartEdit(block.id, block.text, block.revision)
+            }
+            onSelectBlock={handleSelectBlock}
+            onVoiceChange={handleUpdateBlockVoice}
+            onGenerate={handleGenerateBlockAudio}
+          />
         </div>
       )}
       <LiveCursors />

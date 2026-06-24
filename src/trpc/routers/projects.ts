@@ -1,12 +1,52 @@
+import * as Sentry from "@sentry/nextjs";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
+import { chatterbox } from "@/lib/chatterbox-client";
 import { prisma } from "@/lib/db";
+import { uploadAudio } from "@/lib/r2";
+import { TEXT_MAX_LENGTH } from "@/features/text-to-speech/data/constants";
 import { createTRPCRouter, orgProcedure } from "../init";
 
 const BLOCK_LOCK_TTL_MS = 2 * 60 * 1000;
 
 function getLockExpiry() {
   return new Date(Date.now() + BLOCK_LOCK_TTL_MS);
+}
+
+async function ensureEditableBlock(blockId: string, orgId: string, userId: string) {
+  const now = new Date();
+  const block = await prisma.projectBlock.findFirst({
+    where: {
+      id: blockId,
+      project: {
+        orgId,
+      },
+    },
+    select: {
+      id: true,
+      text: true,
+      voiceId: true,
+      lockOwnerId: true,
+      lockExpiresAt: true,
+    },
+  });
+
+  if (!block) {
+    throw new TRPCError({ code: "NOT_FOUND" });
+  }
+
+  if (
+    block.lockOwnerId !== userId ||
+    !block.lockExpiresAt ||
+    block.lockExpiresAt <= now
+  ) {
+    throw new TRPCError({
+      code: "CONFLICT",
+      message: "You need the active edit lock before changing this block.",
+    });
+  }
+
+  return block;
 }
 
 export const projectsRouter = createTRPCRouter({
@@ -28,6 +68,30 @@ export const projectsRouter = createTRPCRouter({
         include: {
           blocks: {
             orderBy: { order: "asc" },
+            include: {
+              voice: {
+                select: {
+                  id: true,
+                  name: true,
+                  category: true,
+                  language: true,
+                  variant: true,
+                },
+              },
+              generation: {
+                select: {
+                  id: true,
+                  text: true,
+                  voiceId: true,
+                  voiceName: true,
+                  temperature: true,
+                  topP: true,
+                  topK: true,
+                  repetitionPenalty: true,
+                  createdAt: true,
+                },
+              },
+            },
           },
         },
       });
@@ -36,7 +100,18 @@ export const projectsRouter = createTRPCRouter({
         throw new TRPCError({ code: "NOT_FOUND" });
       }
 
-      return project;
+      return {
+        ...project,
+        blocks: project.blocks.map((block) => ({
+          ...block,
+          generation: block.generation
+            ? {
+                ...block.generation,
+                audioUrl: `/api/audio/${block.generation.id}`,
+              }
+            : null,
+        })),
+      };
     }),
 
   create: orgProcedure
@@ -149,6 +224,206 @@ export const projectsRouter = createTRPCRouter({
             lockExpiresAt: getLockExpiry(),
         },
       });
+    }),
+
+  updateBlockVoice: orgProcedure
+    .input(
+      z.object({
+        blockId: z.string().min(1),
+        voiceId: z.string().min(1),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      await ensureEditableBlock(input.blockId, ctx.orgId, ctx.userId);
+
+      const voice = await prisma.voice.findUnique({
+        where: {
+          id: input.voiceId,
+          OR: [
+            { variant: "SYSTEM" },
+            { variant: "CUSTOM", orgId: ctx.orgId },
+          ],
+        },
+        select: { id: true },
+      });
+
+      if (!voice) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Voice not found",
+        });
+      }
+
+      return prisma.projectBlock.update({
+        where: { id: input.blockId },
+        data: {
+          voiceId: voice.id,
+          revision: { increment: 1 },
+          lockExpiresAt: getLockExpiry(),
+        },
+      });
+    }),
+
+  generateBlockAudio: orgProcedure
+    .input(
+      z.object({
+        blockId: z.string().min(1),
+        temperature: z.number().min(0).max(2).default(0.8),
+        topP: z.number().min(0).max(1).default(0.95),
+        topK: z.number().min(1).max(10000).default(1000),
+        repetitionPenalty: z.number().min(1).max(2).default(1.2),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      const block = await ensureEditableBlock(input.blockId, ctx.orgId, ctx.userId);
+
+      if (block.text.length > TEXT_MAX_LENGTH) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Block text must be ${TEXT_MAX_LENGTH} characters or less.`,
+        });
+      }
+
+      if (!block.voiceId) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Select a voice before generating this block.",
+        });
+      }
+
+      const voice = await prisma.voice.findUnique({
+        where: {
+          id: block.voiceId,
+          OR: [
+            { variant: "SYSTEM" },
+            { variant: "CUSTOM", orgId: ctx.orgId },
+          ],
+        },
+        select: {
+          id: true,
+          name: true,
+          r2ObjectKey: true,
+        },
+      });
+
+      if (!voice) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Voice not found",
+        });
+      }
+
+      if (!voice.r2ObjectKey) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Voice audio not available",
+        });
+      }
+
+      await prisma.projectBlock.update({
+        where: { id: block.id },
+        data: {
+          status: "GENERATING",
+          lockExpiresAt: getLockExpiry(),
+        },
+      });
+
+      let generationId: string | null = null;
+
+      try {
+        const { data, error } = await chatterbox.POST("/generate", {
+          body: {
+            prompt: block.text,
+            voice_key: voice.r2ObjectKey,
+            temperature: input.temperature,
+            top_p: input.topP,
+            top_k: input.topK,
+            repetition_penalty: input.repetitionPenalty,
+            norm_loudness: true,
+          },
+          parseAs: "arrayBuffer",
+        });
+
+        Sentry.logger.info("Project block generation started", {
+          orgId: ctx.orgId,
+          blockId: block.id,
+          voiceId: voice.id,
+          textLength: block.text.length,
+        });
+
+        if (error || !(data instanceof ArrayBuffer)) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "Failed to generate audio",
+          });
+        }
+
+        const generation = await prisma.generation.create({
+          data: {
+            orgId: ctx.orgId,
+            text: block.text,
+            voiceName: voice.name,
+            voiceId: voice.id,
+            temperature: input.temperature,
+            topP: input.topP,
+            topK: input.topK,
+            repetitionPenalty: input.repetitionPenalty,
+          },
+          select: { id: true },
+        });
+
+        generationId = generation.id;
+        const r2ObjectKey = `generations/orgs/${ctx.orgId}/${generation.id}`;
+        await uploadAudio({
+          buffer: Buffer.from(data),
+          key: r2ObjectKey,
+        });
+
+        await prisma.generation.update({
+          where: { id: generation.id },
+          data: { r2ObjectKey },
+        });
+
+        return prisma.projectBlock.update({
+          where: { id: block.id },
+          data: {
+            generationId: generation.id,
+            status: "GENERATED",
+            revision: { increment: 1 },
+            lockExpiresAt: getLockExpiry(),
+          },
+        });
+      } catch (error) {
+        if (generationId) {
+          await prisma.generation
+            .delete({
+              where: { id: generationId },
+            })
+            .catch(() => {});
+        }
+
+        await prisma.projectBlock
+          .update({
+            where: { id: block.id },
+            data: { status: "FAILED" },
+          })
+          .catch(() => {});
+
+        Sentry.logger.error("Project block generation failed", {
+          orgId: ctx.orgId,
+          blockId: block.id,
+          voiceId: voice.id,
+        });
+
+        if (error instanceof TRPCError) {
+          throw error;
+        }
+
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to store generated audio",
+        });
+      }
     }),
 
   deleteBlock: orgProcedure
