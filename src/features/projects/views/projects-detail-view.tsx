@@ -1,6 +1,12 @@
 "use client";
 
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import {
+  type FormEvent,
+  type PointerEvent,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   useMutation,
   useQueryClient,
@@ -20,6 +26,13 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Textarea } from "@/components/ui/textarea";
+import { ActiveCollaborators } from "@/features/collaborative-audio/components/active-collaborators";
+import { LiveCursors } from "@/features/collaborative-audio/components/live-cursors";
+import { LobbyProvider } from "@/features/collaborative-audio/contexts/lobby-provider";
+import {
+  useOthers,
+  useUpdateMyPresence,
+} from "@/features/collaborative-audio/lib/realtime";
 import { useTRPC } from "@/trpc/client";
 
 // const demoBlocks = [
@@ -41,8 +54,18 @@ import { useTRPC } from "@/trpc/client";
 // ];
 
 export function ProjectDetailView({ projectId }: { projectId: string }) {
+  return (
+    <LobbyProvider projectId={projectId}>
+      <ProjectDetailContent projectId={projectId} />
+    </LobbyProvider>
+  );
+}
+
+function ProjectDetailContent({ projectId }: { projectId: string }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
+  const updateMyPresence = useUpdateMyPresence();
+  const others = useOthers();
   const [text, setText] = useState("");
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
@@ -75,6 +98,7 @@ export function ProjectDetailView({ projectId }: { projectId: string }) {
     trpc.projects.updateBlock.mutationOptions({
       onSuccess: async (_updatedBlock, variables) => {
         releaseBlockLock.mutate({ blockId: variables.blockId });
+        updateMyPresence({ editingBlockId: null });
         setEditingBlockId(null);
         setEditingText("");
         setEditingRevision(null);
@@ -123,6 +147,10 @@ export function ProjectDetailView({ projectId }: { projectId: string }) {
     trpc.projects.deleteBlock.mutationOptions({
       onSuccess: async (_deletedBlock, variables) => {
         if (editingBlockId === variables.blockId) {
+          updateMyPresence({
+            editingBlockId: null,
+            selectedBlockId: null,
+          });
           setEditingBlockId(null);
           setEditingText("");
           setEditingRevision(null);
@@ -162,6 +190,10 @@ export function ProjectDetailView({ projectId }: { projectId: string }) {
       { blockId },
       {
         onSuccess: () => {
+          updateMyPresence({
+            editingBlockId: blockId,
+            selectedBlockId: blockId,
+          });
           setEditingBlockId(blockId);
           setEditingText(blockText);
           setEditingRevision(blockRevision);
@@ -175,6 +207,7 @@ export function ProjectDetailView({ projectId }: { projectId: string }) {
       releaseBlockLock.mutate({ blockId: editingBlockId });
     }
 
+    updateMyPresence({ editingBlockId: null });
     setEditingBlockId(null);
     setEditingText("");
     setEditingRevision(null);
@@ -213,18 +246,39 @@ export function ProjectDetailView({ projectId }: { projectId: string }) {
     deleteBlock.mutate({ blockId });
   };
 
-  return (
-    <div className="flex flex-1 flex-col gap-6 p-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          {project.name}
-        </h1>
+  const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    updateMyPresence({
+      cursor: {
+        x: event.clientX,
+        y: event.clientY,
+      },
+    });
+  };
 
-        {project.description && (
-          <p className="text-sm text-muted-foreground">
-            {project.description}
-          </p>
-        )}
+  const handlePointerLeave = () => {
+    updateMyPresence({ cursor: null });
+  };
+
+  return (
+    <div
+      className="flex flex-1 flex-col gap-6 p-6"
+      onPointerMove={handlePointerMove}
+      onPointerLeave={handlePointerLeave}
+    >
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            {project.name}
+          </h1>
+
+          {project.description && (
+            <p className="text-sm text-muted-foreground">
+              {project.description}
+            </p>
+          )}
+        </div>
+
+        <ActiveCollaborators />
       </div>
 
       <form
@@ -267,6 +321,9 @@ export function ProjectDetailView({ projectId }: { projectId: string }) {
         <div className="grid gap-3">
           {project.blocks.map((block, index) => {
             const isEditing = editingBlockId === block.id;
+            const otherEditingUser = others.find(
+              (user) => user.presence.editingBlockId === block.id,
+            );
             const isBusy =
               acquireBlockLock.isPending ||
               updateBlock.isPending ||
@@ -277,11 +334,19 @@ export function ProjectDetailView({ projectId }: { projectId: string }) {
               <div
                 key={block.id}
                 className="rounded-lg border bg-background p-5 shadow-sm"
+                onClick={() =>
+                  updateMyPresence({ selectedBlockId: block.id })
+                }
               >
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
                     <p className="text-sm font-medium">Block {index + 1}</p>
                     <Badge variant="outline">Text</Badge>
+                    {otherEditingUser && (
+                      <Badge variant="secondary">
+                        {otherEditingUser.info?.name ?? "Someone"} is editing
+                      </Badge>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-1">
@@ -349,6 +414,7 @@ export function ProjectDetailView({ projectId }: { projectId: string }) {
           })}
         </div>
       )}
+      <LiveCursors />
     </div>
     // <div className="flex flex-1 flex-col gap-6 p-6">
     //   <div>
