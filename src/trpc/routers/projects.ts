@@ -491,6 +491,38 @@ export const projectsRouter = createTRPCRouter({
       });
     }),
 
+  updateBlockTimeline: orgProcedure
+    .input(
+      z.object({
+        projectId: z.string().min(1),
+        blockId: z.string().min(1),
+        timelineStartMs: z.number().int().min(0).max(10 * 60 * 1000),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      const block = await prisma.projectBlock.findFirst({
+        where: {
+          id: input.blockId,
+          projectId: input.projectId,
+          project: {
+            orgId: ctx.orgId,
+          },
+        },
+        select: { id: true },
+      });
+
+      if (!block) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+
+      return prisma.projectBlock.update({
+        where: { id: block.id },
+        data: {
+          timelineStartMs: input.timelineStartMs,
+        },
+      });
+    }),
+
   deleteBlock: orgProcedure
     .input(
       z.object({

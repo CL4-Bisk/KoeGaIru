@@ -44,6 +44,7 @@ import {
   useUpdateMyPresence,
 } from "@/features/collaborative-audio/lib/realtime";
 import { ProjectBlockSettingsPanel } from "@/features/projects/components/project-block-settings-panel";
+import { ProjectTimeline } from "@/features/projects/components/project-timeline";
 import { reorderBlockIds } from "@/features/projects/lib/reorder-blocks";
 import { useTRPC } from "@/trpc/client";
 
@@ -65,6 +66,8 @@ import { useTRPC } from "@/trpc/client";
 //   },
 // ];
 
+const BLOCK_ORDER_DRAG_TYPE = "application/x-koegairu-block-order";
+
 export function ProjectDetailView({ projectId }: { projectId: string }) {
   return (
     <LobbyProvider projectId={projectId}>
@@ -85,6 +88,9 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const [draggingBlockId, setDraggingBlockId] = useState<string | null>(null);
   const [dragOverBlockId, setDragOverBlockId] = useState<string | null>(null);
+  const [draggingTimelineBlockId, setDraggingTimelineBlockId] = useState<
+    string | null
+  >(null);
   const editingBlockIdRef = useRef<string | null>(null);
 
   const { data: project } = useSuspenseQuery(
@@ -174,6 +180,21 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
       onSettled: () => {
         setDraggingBlockId(null);
         setDragOverBlockId(null);
+      },
+    }),
+  );
+
+  const updateBlockTimeline = useMutation(
+    trpc.projects.updateBlockTimeline.mutationOptions({
+      onSuccess: async () => {
+        await invalidateProject();
+        toast.success("Timeline position updated");
+      },
+      onError: (error) => {
+        toast.error(error.message);
+      },
+      onSettled: () => {
+        setDraggingTimelineBlockId(null);
       },
     }),
   );
@@ -350,7 +371,7 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
   ) => {
     event.stopPropagation();
     event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", blockId);
+    event.dataTransfer.setData(BLOCK_ORDER_DRAG_TYPE, blockId);
     setDraggingBlockId(blockId);
     setSelectedBlockId(blockId);
     updateMyPresence({ selectedBlockId: blockId });
@@ -387,7 +408,7 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
     event.stopPropagation();
 
     const draggedBlockId =
-      event.dataTransfer.getData("text/plain") || draggingBlockId;
+      event.dataTransfer.getData(BLOCK_ORDER_DRAG_TYPE) || draggingBlockId;
 
     if (!draggedBlockId || draggedBlockId === targetBlockId) {
       setDraggingBlockId(null);
@@ -419,6 +440,22 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
     setDragOverBlockId(null);
   };
 
+  const handleTimelineDragStart = (blockId: string) => {
+    setDraggingTimelineBlockId(blockId);
+    handleSelectBlock(blockId);
+  };
+
+  const handleTimelineMoveBlock = (
+    blockId: string,
+    timelineStartMs: number,
+  ) => {
+    updateBlockTimeline.mutate({
+      projectId,
+      blockId,
+      timelineStartMs,
+    });
+  };
+
   const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
     updateMyPresence({
       cursor: {
@@ -438,6 +475,7 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
     updateBlockVoice.isPending ||
     generateBlockAudio.isPending ||
     reorderProjectBlocks.isPending ||
+    updateBlockTimeline.isPending ||
     deleteBlock.isPending ||
     releaseBlockLock.isPending;
 
@@ -501,7 +539,18 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
         </Empty>
       ) : (
         <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
-          <div className="grid gap-3">
+          <div className="grid gap-4">
+            <ProjectTimeline
+              blocks={project.blocks}
+              selectedBlockId={selectedBlockId}
+              draggingTimelineBlockId={draggingTimelineBlockId}
+              isBusy={isBlockActionPending}
+              onSelectBlock={handleSelectBlock}
+              onDragStart={handleTimelineDragStart}
+              onDragEnd={() => setDraggingTimelineBlockId(null)}
+              onMoveBlock={handleTimelineMoveBlock}
+            />
+
             {project.blocks.map((block, index) => {
               const isEditing = editingBlockId === block.id;
               const isSelected = selectedBlockId === block.id;
