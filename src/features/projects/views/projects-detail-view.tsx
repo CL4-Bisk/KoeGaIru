@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  type DragEvent,
   type FormEvent,
   type KeyboardEvent,
   type PointerEvent,
@@ -13,7 +14,15 @@ import {
   useQueryClient,
   useSuspenseQuery,
 } from "@tanstack/react-query";
-import { FileText, Pencil, Plus, Save, Trash2, X } from "lucide-react";
+import {
+  FileText,
+  GripVertical,
+  Pencil,
+  Plus,
+  Save,
+  Trash2,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -35,6 +44,7 @@ import {
   useUpdateMyPresence,
 } from "@/features/collaborative-audio/lib/realtime";
 import { ProjectBlockSettingsPanel } from "@/features/projects/components/project-block-settings-panel";
+import { reorderBlockIds } from "@/features/projects/lib/reorder-blocks";
 import { useTRPC } from "@/trpc/client";
 
 // const demoBlocks = [
@@ -73,6 +83,8 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
   const [editingText, setEditingText] = useState("");
   const [editingRevision, setEditingRevision] = useState<number | null>(null);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
+  const [draggingBlockId, setDraggingBlockId] = useState<string | null>(null);
+  const [dragOverBlockId, setDragOverBlockId] = useState<string | null>(null);
   const editingBlockIdRef = useRef<string | null>(null);
 
   const { data: project } = useSuspenseQuery(
@@ -146,6 +158,22 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
       onError: async (error) => {
         await invalidateProject();
         toast.error(error.message);
+      },
+    }),
+  );
+
+  const reorderProjectBlocks = useMutation(
+    trpc.projects.reorderBlocks.mutationOptions({
+      onSuccess: async () => {
+        await invalidateProject();
+        toast.success("Block order updated");
+      },
+      onError: (error) => {
+        toast.error(error.message);
+      },
+      onSettled: () => {
+        setDraggingBlockId(null);
+        setDragOverBlockId(null);
       },
     }),
   );
@@ -316,6 +344,81 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
     generateBlockAudio.mutate({ blockId });
   };
 
+  const handleBlockDragStart = (
+    event: DragEvent<HTMLButtonElement>,
+    blockId: string,
+  ) => {
+    event.stopPropagation();
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", blockId);
+    setDraggingBlockId(blockId);
+    setSelectedBlockId(blockId);
+    updateMyPresence({ selectedBlockId: blockId });
+  };
+
+  const handleBlockDragOver = (
+    event: DragEvent<HTMLDivElement>,
+    targetBlockId: string,
+  ) => {
+    if (!draggingBlockId || draggingBlockId === targetBlockId) {
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setDragOverBlockId(targetBlockId);
+  };
+
+  const handleBlockDragLeave = (event: DragEvent<HTMLDivElement>) => {
+    const nextTarget = event.relatedTarget;
+
+    if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
+      return;
+    }
+
+    setDragOverBlockId(null);
+  };
+
+  const handleBlockDrop = (
+    event: DragEvent<HTMLDivElement>,
+    targetBlockId: string,
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const draggedBlockId =
+      event.dataTransfer.getData("text/plain") || draggingBlockId;
+
+    if (!draggedBlockId || draggedBlockId === targetBlockId) {
+      setDraggingBlockId(null);
+      setDragOverBlockId(null);
+      return;
+    }
+
+    const currentBlockIds = project.blocks.map((block) => block.id);
+    const reorderedBlockIds = reorderBlockIds(
+      currentBlockIds,
+      draggedBlockId,
+      targetBlockId,
+    );
+
+    if (reorderedBlockIds === currentBlockIds) {
+      setDraggingBlockId(null);
+      setDragOverBlockId(null);
+      return;
+    }
+
+    reorderProjectBlocks.mutate({
+      projectId,
+      blockIds: reorderedBlockIds,
+    });
+  };
+
+  const handleBlockDragEnd = () => {
+    setDraggingBlockId(null);
+    setDragOverBlockId(null);
+  };
+
   const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
     updateMyPresence({
       cursor: {
@@ -334,6 +437,7 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
     updateBlock.isPending ||
     updateBlockVoice.isPending ||
     generateBlockAudio.isPending ||
+    reorderProjectBlocks.isPending ||
     deleteBlock.isPending ||
     releaseBlockLock.isPending;
 
@@ -401,6 +505,9 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
             {project.blocks.map((block, index) => {
               const isEditing = editingBlockId === block.id;
               const isSelected = selectedBlockId === block.id;
+              const isDragging = draggingBlockId === block.id;
+              const isDragTarget =
+                dragOverBlockId === block.id && draggingBlockId !== block.id;
               const otherEditingUser = others.find(
                 (user) => user.presence.editingBlockId === block.id,
               );
@@ -412,12 +519,33 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
                   tabIndex={0}
                   className={`rounded-lg border bg-background p-5 shadow-sm transition-colors ${
                     isSelected ? "border-primary/70 bg-primary/5" : ""
+                  } ${isDragging ? "opacity-50" : ""} ${
+                    isDragTarget ? "border-primary bg-primary/10" : ""
                   }`}
                   onClick={() => handleSelectBlock(block.id)}
                   onKeyDown={(event) => handleBlockKeyDown(event, block.id)}
+                  onDragOver={(event) => handleBlockDragOver(event, block.id)}
+                  onDragLeave={handleBlockDragLeave}
+                  onDrop={(event) => handleBlockDrop(event, block.id)}
                 >
                   <div className="mb-3 flex items-center justify-between gap-3">
                     <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        draggable={!isBlockActionPending && !isEditing}
+                        disabled={isBlockActionPending || isEditing}
+                        className="cursor-grab active:cursor-grabbing"
+                        onClick={(event) => event.stopPropagation()}
+                        onDragStart={(event) =>
+                          handleBlockDragStart(event, block.id)
+                        }
+                        onDragEnd={handleBlockDragEnd}
+                      >
+                        <GripVertical className="size-4" />
+                        <span className="sr-only">Drag block</span>
+                      </Button>
                       <p className="text-sm font-medium">Block {index + 1}</p>
                       <Badge variant="outline">Text</Badge>
                       <Badge variant="secondary">{block.status}</Badge>

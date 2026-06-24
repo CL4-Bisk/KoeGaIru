@@ -426,6 +426,71 @@ export const projectsRouter = createTRPCRouter({
       }
     }),
 
+  reorderBlocks: orgProcedure
+    .input(
+      z.object({
+        projectId: z.string().min(1),
+        blockIds: z.array(z.string().min(1)).min(1),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      const uniqueBlockIds = new Set(input.blockIds);
+
+      if (uniqueBlockIds.size !== input.blockIds.length) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Block order contains duplicate blocks.",
+        });
+      }
+
+      return prisma.$transaction(async (tx) => {
+        const project = await tx.project.findFirst({
+          where: {
+            id: input.projectId,
+            orgId: ctx.orgId,
+          },
+          select: { id: true },
+        });
+
+        if (!project) {
+          throw new TRPCError({ code: "NOT_FOUND" });
+        }
+
+        const blocks = await tx.projectBlock.findMany({
+          where: {
+            projectId: input.projectId,
+            project: {
+              orgId: ctx.orgId,
+            },
+          },
+          select: { id: true },
+        });
+
+        const projectBlockIds = new Set(blocks.map((block) => block.id));
+        const orderMatchesProject =
+          blocks.length === input.blockIds.length &&
+          input.blockIds.every((blockId) => projectBlockIds.has(blockId));
+
+        if (!orderMatchesProject) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "Block order is stale. Refresh before reordering.",
+          });
+        }
+
+        await Promise.all(
+          input.blockIds.map((blockId, order) =>
+            tx.projectBlock.update({
+              where: { id: blockId },
+              data: { order },
+            }),
+          ),
+        );
+
+        return { success: true };
+      });
+    }),
+
   deleteBlock: orgProcedure
     .input(
       z.object({
