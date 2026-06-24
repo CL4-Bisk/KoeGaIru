@@ -49,4 +49,95 @@ export const projectsRouter = createTRPCRouter({
         },
       });
     }),
+
+  createBlock: orgProcedure
+    .input(
+      z.object({
+        projectId: z.string().min(1),
+        text: z.string().trim().min(1).max(5000),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      return prisma.$transaction(async (tx) => {
+        const project = await tx.project.findFirst({
+          where: {
+            id: input.projectId,
+            orgId: ctx.orgId,
+          },
+          select: { id: true },
+        });
+
+        if (!project) {
+          throw new TRPCError({ code: "NOT_FOUND" });
+        }
+
+        const lastBlock = await tx.projectBlock.findFirst({
+          where: { projectId: input.projectId },
+          orderBy: { order: "desc" },
+          select: { order: true },
+        });
+
+        return tx.projectBlock.create({
+          data: {
+            projectId: input.projectId,
+            text: input.text,
+            order: (lastBlock?.order ?? -1) + 1,
+          },
+        });
+      });
+    }),
+
+  updateBlock: orgProcedure
+    .input(
+      z.object({
+        blockId: z.string().min(1),
+        text: z.string().trim().min(1).max(5000),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      const block = await prisma.projectBlock.findFirst({
+        where: {
+          id: input.blockId,
+          project: {
+            orgId: ctx.orgId,
+          },
+        },
+        select: { id: true },
+      });
+
+      if (!block) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+
+      return prisma.projectBlock.update({
+        where: { id: input.blockId },
+        data: { text: input.text },
+      });
+    }),
+
+  deleteBlock: orgProcedure
+    .input(
+      z.object({
+        blockId: z.string().min(1),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      const block = await prisma.projectBlock.findFirst({
+        where: {
+          id: input.blockId,
+          project: {
+            orgId: ctx.orgId,
+          },
+        },
+        select: { id: true },
+      });
+
+      if (!block) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+
+      return prisma.projectBlock.delete({
+        where: { id: input.blockId },
+      });
+    }),
 });
