@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import {
   useMutation,
   useQueryClient,
@@ -46,6 +46,8 @@ export function ProjectDetailView({ projectId }: { projectId: string }) {
   const [text, setText] = useState("");
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
+  const [editingRevision, setEditingRevision] = useState<number | null>(null);
+  const editingBlockIdRef = useRef<string | null>(null);
 
   const { data: project } = useSuspenseQuery(
     trpc.projects.getById.queryOptions({ id: projectId }),
@@ -71,9 +73,11 @@ export function ProjectDetailView({ projectId }: { projectId: string }) {
 
   const updateBlock = useMutation(
     trpc.projects.updateBlock.mutationOptions({
-      onSuccess: async () => {
+      onSuccess: async (_updatedBlock, variables) => {
+        releaseBlockLock.mutate({ blockId: variables.blockId });
         setEditingBlockId(null);
         setEditingText("");
+        setEditingRevision(null);
         await invalidateProject();
         toast.success("Text block updated");
       },
@@ -83,12 +87,45 @@ export function ProjectDetailView({ projectId }: { projectId: string }) {
     }),
   );
 
+  const acquireBlockLock = useMutation(
+    trpc.projects.acquireBlockLock.mutationOptions({
+      onError: (error) => {
+        toast.error(error.message);
+      },
+    }),
+  );
+
+  const releaseBlockLock = useMutation(
+    trpc.projects.releaseBlockLock.mutationOptions({
+      onError: (error) => {
+        toast.error(error.message);
+      },
+    }),
+  );
+
+  useEffect(() => {
+    editingBlockIdRef.current = editingBlockId;
+  }, [editingBlockId]);
+
+  useEffect(() => {
+    const releaseLock = releaseBlockLock.mutate;
+
+    return () => {
+      const blockId = editingBlockIdRef.current;
+
+      if (blockId) {
+        releaseLock({ blockId });
+      }
+    };
+  }, [releaseBlockLock.mutate]);
+
   const deleteBlock = useMutation(
     trpc.projects.deleteBlock.mutationOptions({
       onSuccess: async (_deletedBlock, variables) => {
         if (editingBlockId === variables.blockId) {
           setEditingBlockId(null);
           setEditingText("");
+          setEditingRevision(null);
         }
 
         await invalidateProject();
@@ -116,14 +153,31 @@ export function ProjectDetailView({ projectId }: { projectId: string }) {
     });
   };
 
-  const handleStartEdit = (blockId: string, blockText: string) => {
-    setEditingBlockId(blockId);
-    setEditingText(blockText);
+  const handleStartEdit = (
+    blockId: string,
+    blockText: string,
+    blockRevision: number,
+  ) => {
+    acquireBlockLock.mutate(
+      { blockId },
+      {
+        onSuccess: () => {
+          setEditingBlockId(blockId);
+          setEditingText(blockText);
+          setEditingRevision(blockRevision);
+        },
+      },
+    );
   };
 
   const handleCancelEdit = () => {
+    if (editingBlockId) {
+      releaseBlockLock.mutate({ blockId: editingBlockId });
+    }
+
     setEditingBlockId(null);
     setEditingText("");
+    setEditingRevision(null);
   };
 
   const handleUpdateBlock = (
@@ -139,9 +193,15 @@ export function ProjectDetailView({ projectId }: { projectId: string }) {
       return;
     }
 
+    if (!editingRevision) {
+      toast.error("Missing block revision. Refresh and try again.");
+      return;
+    }
+
     updateBlock.mutate({
       blockId,
       text: trimmedText,
+      revision: editingRevision,
     });
   };
 
@@ -207,7 +267,11 @@ export function ProjectDetailView({ projectId }: { projectId: string }) {
         <div className="grid gap-3">
           {project.blocks.map((block, index) => {
             const isEditing = editingBlockId === block.id;
-            const isBusy = updateBlock.isPending || deleteBlock.isPending;
+            const isBusy =
+              acquireBlockLock.isPending ||
+              updateBlock.isPending ||
+              deleteBlock.isPending ||
+              releaseBlockLock.isPending;
 
             return (
               <div
@@ -226,7 +290,9 @@ export function ProjectDetailView({ projectId }: { projectId: string }) {
                       variant="ghost"
                       size="icon-sm"
                       disabled={isBusy}
-                      onClick={() => handleStartEdit(block.id, block.text)}
+                      onClick={() =>
+                        handleStartEdit(block.id, block.text, block.revision)
+                      }
                     >
                       <Pencil className="size-4" />
                       <span className="sr-only">Edit block</span>
