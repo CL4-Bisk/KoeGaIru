@@ -33,6 +33,14 @@ enum VoiceCategory {
   CORPORATE
 }
 
+enum ProjectBlockStatus {
+  DRAFT
+  EDITING
+  GENERATING
+  GENERATED
+  FAILED
+}
+
 model Voice {
   id String @id @default(cuid())
 
@@ -102,9 +110,19 @@ model ProjectBlock {
   projectId String
   project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
-  order Int
+  order              Int
+  timelineStartMs    Int  @default(0)
+  timelineDurationMs Int?
 
-  text    String
+  text     String
+  revision Int    @default(1)
+
+  lockOwnerId   String?
+  lockedAt      DateTime?
+  lockExpiresAt DateTime?
+
+  status ProjectBlockStatus @default(DRAFT)
+
   voiceId String?
   voice   Voice?  @relation(fields: [voiceId], references: [id], onDelete: SetNull)
 
@@ -117,4 +135,6 @@ model ProjectBlock {
   @@index([projectId])
   @@index([voiceId])
   @@index([generationId])
+  @@index([lockOwnerId])
+  @@index([lockExpiresAt])
 }
