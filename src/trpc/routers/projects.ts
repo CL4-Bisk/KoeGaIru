@@ -496,10 +496,26 @@ export const projectsRouter = createTRPCRouter({
       z.object({
         projectId: z.string().min(1),
         blockId: z.string().min(1),
-        timelineStartMs: z.number().int().min(0).max(10 * 60 * 1000),
+        timelineStartMs: z.number().int().min(0).max(10 * 60 * 1000).optional(),
+        timelineDurationMs: z
+          .number()
+          .int()
+          .min(500)
+          .max(10 * 60 * 1000)
+          .optional(),
       }),
     )
     .mutation(async ({ input, ctx }) => {
+      if (
+        input.timelineStartMs === undefined &&
+        input.timelineDurationMs === undefined
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "No timeline changes provided.",
+        });
+      }
+
       const block = await prisma.projectBlock.findFirst({
         where: {
           id: input.blockId,
@@ -518,7 +534,12 @@ export const projectsRouter = createTRPCRouter({
       return prisma.projectBlock.update({
         where: { id: block.id },
         data: {
-          timelineStartMs: input.timelineStartMs,
+          ...(input.timelineStartMs !== undefined
+            ? { timelineStartMs: input.timelineStartMs }
+            : {}),
+          ...(input.timelineDurationMs !== undefined
+            ? { timelineDurationMs: input.timelineDurationMs }
+            : {}),
         },
       });
     }),

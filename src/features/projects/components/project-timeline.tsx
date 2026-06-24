@@ -1,16 +1,23 @@
 "use client";
 
-import type { DragEvent } from "react";
+import {
+  type DragEvent,
+  type PointerEvent,
+  useEffect,
+  useState,
+} from "react";
 import type { inferRouterOutputs } from "@trpc/server";
 import { AudioLines, Clock, GripVertical } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import type { AppRouter } from "@/trpc/routers/_app";
 import {
+  calculateTimelineDurationMs,
   calculateTimelineStartMs,
   formatTimelineTime,
+  getBlockTimelineDurationMs,
   getTimelineLeftPercent,
+  getTimelineWidthPercent,
   TIMELINE_DURATION_MS,
 } from "../lib/timeline-position";
 
@@ -19,6 +26,14 @@ type ProjectBlock = Project["blocks"][number];
 
 const TIMELINE_BLOCK_DRAG_TYPE = "application/x-koegairu-timeline-block";
 const timelineMarks = [0, 30000, 60000, 90000, 120000];
+
+type ResizeState = {
+  blockId: string;
+  timelineStartMs: number;
+  durationMs: number;
+  trackLeft: number;
+  trackWidth: number;
+};
 
 export function ProjectTimeline({
   blocks,
@@ -29,6 +44,7 @@ export function ProjectTimeline({
   onDragStart,
   onDragEnd,
   onMoveBlock,
+  onResizeBlock,
 }: {
   blocks: ProjectBlock[];
   selectedBlockId: string | null;
@@ -38,7 +54,43 @@ export function ProjectTimeline({
   onDragStart: (blockId: string) => void;
   onDragEnd: () => void;
   onMoveBlock: (blockId: string, timelineStartMs: number) => void;
+  onResizeBlock: (blockId: string, timelineDurationMs: number) => void;
 }) {
+  const [resizeState, setResizeState] = useState<ResizeState | null>(null);
+
+  useEffect(() => {
+    if (!resizeState) {
+      return;
+    }
+
+    const handlePointerMove = (event: globalThis.PointerEvent) => {
+      const durationMs = calculateTimelineDurationMs({
+        clientX: event.clientX,
+        trackLeft: resizeState.trackLeft,
+        trackWidth: resizeState.trackWidth,
+        timelineStartMs: resizeState.timelineStartMs,
+        timelineDurationMs: TIMELINE_DURATION_MS,
+      });
+
+      setResizeState((current) =>
+        current ? { ...current, durationMs } : current,
+      );
+    };
+
+    const handlePointerUp = () => {
+      onResizeBlock(resizeState.blockId, resizeState.durationMs);
+      setResizeState(null);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp, { once: true });
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [onResizeBlock, resizeState]);
+
   const handleDragStart = (
     event: DragEvent<HTMLButtonElement>,
     blockId: string,
@@ -72,6 +124,29 @@ export function ProjectTimeline({
     });
 
     onMoveBlock(blockId || fallbackBlockId, timelineStartMs);
+  };
+
+  const handleResizeStart = (
+    event: PointerEvent<HTMLButtonElement>,
+    block: ProjectBlock,
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const track = event.currentTarget.closest("[data-timeline-track]");
+
+    if (!(track instanceof HTMLElement)) {
+      return;
+    }
+
+    const rect = track.getBoundingClientRect();
+    setResizeState({
+      blockId: block.id,
+      timelineStartMs: block.timelineStartMs,
+      durationMs: getBlockTimelineDurationMs(block.timelineDurationMs),
+      trackLeft: rect.left,
+      trackWidth: rect.width,
+    });
   };
 
   return (
@@ -108,8 +183,14 @@ export function ProjectTimeline({
           <div className="flex flex-col gap-2">
             {blocks.map((block, index) => {
               const left = getTimelineLeftPercent(block.timelineStartMs);
+              const durationMs =
+                resizeState?.blockId === block.id
+                  ? resizeState.durationMs
+                  : getBlockTimelineDurationMs(block.timelineDurationMs);
+              const width = getTimelineWidthPercent(durationMs);
               const isSelected = selectedBlockId === block.id;
               const isDragging = draggingTimelineBlockId === block.id;
+              const isResizing = resizeState?.blockId === block.id;
 
               return (
                 <div
@@ -130,6 +211,7 @@ export function ProjectTimeline({
                   </button>
 
                   <div
+                    data-timeline-track
                     className={`relative h-12 rounded-md border bg-muted/30 ${
                       isSelected ? "border-primary/60" : ""
                     }`}
@@ -149,28 +231,58 @@ export function ProjectTimeline({
                       />
                     ))}
 
-                    <Button
-                      type="button"
-                      variant={isSelected ? "default" : "secondary"}
-                      size="sm"
-                      draggable={!isBusy}
-                      disabled={isBusy}
-                      className={`absolute top-1/2 h-8 max-w-44 -translate-y-1/2 cursor-grab justify-start active:cursor-grabbing ${
+                    <div
+                      className={`absolute top-1/2 flex h-8 min-w-16 max-w-none -translate-y-1/2 overflow-hidden rounded-md text-sm font-medium shadow-xs transition-colors ${
+                        isSelected
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-secondary text-secondary-foreground"
+                      } ${
+                        isBusy ? "pointer-events-none opacity-50" : ""
+                      } ${
                         isDragging ? "opacity-50" : ""
                       }`}
                       style={{
                         left: `${left}%`,
-                        transform: "translate(-50%, -50%)",
+                        width: `${width}%`,
+                        transform: "translateY(-50%)",
                       }}
-                      onClick={() => onSelectBlock(block.id)}
-                      onDragStart={(event) => handleDragStart(event, block.id)}
-                      onDragEnd={onDragEnd}
                     >
-                      <GripVertical className="size-3.5" />
-                      <span className="truncate">
-                        {formatTimelineTime(block.timelineStartMs)}
-                      </span>
-                    </Button>
+                      <button
+                        type="button"
+                        draggable={!isBusy && !isResizing}
+                        className="flex min-w-0 flex-1 cursor-grab items-center gap-2 px-3 active:cursor-grabbing"
+                        onClick={() => onSelectBlock(block.id)}
+                        onDragStart={(event) =>
+                          handleDragStart(event, block.id)
+                        }
+                        onDragEnd={onDragEnd}
+                      >
+                        <GripVertical className="size-3.5 shrink-0" />
+                        <span className="truncate">
+                          {formatTimelineTime(block.timelineStartMs)}
+                        </span>
+                        <span className="ml-auto shrink-0 text-[10px] opacity-80">
+                          {formatTimelineTime(durationMs)}
+                        </span>
+                        <span className="sr-only">
+                          Duration {formatTimelineTime(durationMs)}
+                        </span>
+                      </button>
+                      <span
+                        aria-hidden="true"
+                        className="my-auto h-5 w-px shrink-0 bg-current/30"
+                      />
+                      <button
+                        type="button"
+                        className="h-6 w-3 shrink-0 cursor-ew-resize rounded-sm hover:bg-background/20"
+                        disabled={isBusy}
+                        onPointerDown={(event) =>
+                          handleResizeStart(event, block)
+                        }
+                      >
+                        <span className="sr-only">Resize clip duration</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               );

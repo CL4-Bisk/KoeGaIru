@@ -456,6 +456,17 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
     });
   };
 
+  const handleTimelineResizeBlock = (
+    blockId: string,
+    timelineDurationMs: number,
+  ) => {
+    updateBlockTimeline.mutate({
+      projectId,
+      blockId,
+      timelineDurationMs,
+    });
+  };
+
   const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
     updateMyPresence({
       cursor: {
@@ -549,6 +560,7 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
               onDragStart={handleTimelineDragStart}
               onDragEnd={() => setDraggingTimelineBlockId(null)}
               onMoveBlock={handleTimelineMoveBlock}
+              onResizeBlock={handleTimelineResizeBlock}
             />
 
             {project.blocks.map((block, index) => {

@@ -1,5 +1,7 @@
 export const TIMELINE_DURATION_MS = 120000;
 export const TIMELINE_SNAP_MS = 500;
+export const DEFAULT_BLOCK_DURATION_MS = 3000;
+export const MIN_BLOCK_DURATION_MS = 500;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
@@ -37,6 +39,56 @@ export function getTimelineLeftPercent(
   }
 
   return clamp((timelineStartMs / timelineDurationMs) * 100, 0, 100);
+}
+
+export function getBlockTimelineDurationMs(durationMs: number | null) {
+  if (!durationMs || durationMs <= 0) {
+    return DEFAULT_BLOCK_DURATION_MS;
+  }
+
+  return Math.max(durationMs, MIN_BLOCK_DURATION_MS);
+}
+
+export function getTimelineWidthPercent(
+  durationMs: number,
+  timelineDurationMs = TIMELINE_DURATION_MS,
+) {
+  if (timelineDurationMs <= 0) {
+    return 0;
+  }
+
+  return clamp((durationMs / timelineDurationMs) * 100, 0, 100);
+}
+
+export function calculateTimelineDurationMs({
+  clientX,
+  trackLeft,
+  trackWidth,
+  timelineStartMs,
+  timelineDurationMs = TIMELINE_DURATION_MS,
+  snapMs = TIMELINE_SNAP_MS,
+}: {
+  clientX: number;
+  trackLeft: number;
+  trackWidth: number;
+  timelineStartMs: number;
+  timelineDurationMs?: number;
+  snapMs?: number;
+}) {
+  if (trackWidth <= 0) {
+    return MIN_BLOCK_DURATION_MS;
+  }
+
+  const ratio = clamp((clientX - trackLeft) / trackWidth, 0, 1);
+  const endMs = ratio * timelineDurationMs;
+  const rawDurationMs = Math.max(endMs - timelineStartMs, MIN_BLOCK_DURATION_MS);
+  const snappedDurationMs = Math.round(rawDurationMs / snapMs) * snapMs;
+  const maxDurationMs = Math.max(
+    timelineDurationMs - timelineStartMs,
+    MIN_BLOCK_DURATION_MS,
+  );
+
+  return clamp(snappedDurationMs, MIN_BLOCK_DURATION_MS, maxDurationMs);
 }
 
 export function formatTimelineTime(ms: number) {
