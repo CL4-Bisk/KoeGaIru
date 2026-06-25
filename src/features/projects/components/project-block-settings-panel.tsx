@@ -14,6 +14,7 @@ import {
   RotateCcw,
   Settings,
   Sparkles,
+  Trash2,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -35,6 +36,7 @@ import { VoiceAvatar } from "@/components/voice-avatar/voice-avatar";
 import { getProjectBlockAudioStateLabel } from "@/features/projects/lib/project-audio-state";
 import {
   formatProjectExportDuration,
+  getFailedProjectExportCount,
   getProjectExportVersionLabel,
 } from "@/features/projects/lib/project-export-history";
 import { VOICE_CATEGORY_LABELS } from "@/features/voices/data/voice-categories";
@@ -80,8 +82,10 @@ export function ProjectBlockSettingsPanel({
   onRestoreGeneration,
   canExportProjectAudio,
   isExportingProjectAudio,
+  isClearingFailedExports,
   isCommentActionPending,
   onExportProjectAudio,
+  onClearFailedExports,
   onCreateComment,
   onSetCommentResolved,
 }: {
@@ -98,8 +102,10 @@ export function ProjectBlockSettingsPanel({
   onRestoreGeneration: (blockId: string, historyId: string) => void;
   canExportProjectAudio: boolean;
   isExportingProjectAudio: boolean;
+  isClearingFailedExports: boolean;
   isCommentActionPending: boolean;
   onExportProjectAudio: () => void;
+  onClearFailedExports: () => void;
   onCreateComment: (blockId: string, body: string) => void;
   onSetCommentResolved: (commentId: string, isResolved: boolean) => void;
 }) {
@@ -112,6 +118,7 @@ export function ProjectBlockSettingsPanel({
   const latestExport = project.exports[0] ?? null;
   const latestExportIsOutdated =
     latestExport?.status === "READY" && !latestExport.isLatest;
+  const failedExportCount = getFailedProjectExportCount(project.exports);
   const selectedComments = selectedBlock?.comments ?? [];
   const unresolvedCommentCount = selectedComments.filter(
     (comment) => !comment.isResolved,
@@ -456,17 +463,37 @@ export function ProjectBlockSettingsPanel({
                       project.
                     </p>
                   </div>
-                  {latestExportIsOutdated && (
-                    <Button
-                      type="button"
-                      size="sm"
-                      disabled={!canExportProjectAudio || isExportingProjectAudio}
-                      onClick={onExportProjectAudio}
-                    >
-                      <Download className="size-4" />
-                      {isExportingProjectAudio ? "Exporting..." : "Export again"}
-                    </Button>
-                  )}
+                  <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                    {failedExportCount > 0 && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={isClearingFailedExports}
+                        onClick={onClearFailedExports}
+                      >
+                        <Trash2 className="size-4" />
+                        {isClearingFailedExports
+                          ? "Clearing..."
+                          : `Clear failed (${failedExportCount})`}
+                      </Button>
+                    )}
+                    {latestExportIsOutdated && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={
+                          !canExportProjectAudio || isExportingProjectAudio
+                        }
+                        onClick={onExportProjectAudio}
+                      >
+                        <Download className="size-4" />
+                        {isExportingProjectAudio
+                          ? "Exporting..."
+                          : "Export again"}
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </div>
 

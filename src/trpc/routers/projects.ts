@@ -27,6 +27,7 @@ import {
   isProjectExportLatest,
 } from "@/features/projects/lib/project-export-source";
 import { getProjectCommentCreateData } from "@/features/projects/lib/project-comments";
+import { getFailedProjectExportDeleteWhere } from "@/features/projects/lib/project-export-history";
 import { createTRPCRouter, orgProcedure } from "../init";
 
 const BLOCK_LOCK_TTL_MS = 2 * 60 * 1000;
@@ -895,6 +896,21 @@ export const projectsRouter = createTRPCRouter({
       } finally {
         await rm(tempDir, { recursive: true, force: true });
       }
+    }),
+
+  clearFailedProjectExports: orgProcedure
+    .input(z.object({ projectId: z.string().min(1) }))
+    .mutation(async ({ input, ctx }) => {
+      const result = await prisma.projectExport.deleteMany({
+        where: getFailedProjectExportDeleteWhere({
+          projectId: input.projectId,
+          orgId: ctx.orgId,
+        }),
+      });
+
+      return {
+        deletedCount: result.count,
+      };
     }),
 
   deleteBlock: orgProcedure

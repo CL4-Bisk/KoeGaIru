@@ -272,6 +272,22 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
     }),
   );
 
+  const clearFailedProjectExports = useMutation(
+    trpc.projects.clearFailedProjectExports.mutationOptions({
+      onSuccess: async ({ deletedCount }) => {
+        await invalidateProject();
+        toast.success(
+          deletedCount === 1
+            ? "Failed export cleared"
+            : `${deletedCount} failed exports cleared`,
+        );
+      },
+      onError: (error) => {
+        toast.error(error.message);
+      },
+    }),
+  );
+
   const acquireBlockLock = useMutation(
     trpc.projects.acquireBlockLock.mutationOptions({
       onError: (error) => {
@@ -557,6 +573,18 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
 
   const handleExportProjectAudio = () => {
     exportProjectAudio.mutate({ projectId });
+  };
+
+  const handleClearFailedProjectExports = () => {
+    if (
+      !window.confirm(
+        "Clear failed export records? Ready exports and generated audio will stay saved.",
+      )
+    ) {
+      return;
+    }
+
+    clearFailedProjectExports.mutate({ projectId });
   };
 
   const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
@@ -885,8 +913,10 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
             onRestoreGeneration={handleRestoreBlockGeneration}
             canExportProjectAudio={canExportProjectAudio}
             isExportingProjectAudio={exportProjectAudio.isPending}
+            isClearingFailedExports={clearFailedProjectExports.isPending}
             isCommentActionPending={isCommentActionPending}
             onExportProjectAudio={handleExportProjectAudio}
+            onClearFailedExports={handleClearFailedProjectExports}
             onCreateComment={handleCreateBlockComment}
             onSetCommentResolved={handleSetBlockCommentResolved}
           />

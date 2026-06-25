@@ -1,4 +1,8 @@
-type ProjectExportStatus = "PROCESSING" | "READY" | "FAILED";
+export type ProjectExportStatus = "PROCESSING" | "READY" | "FAILED";
+
+type ProjectExportStatusRecord = {
+  status: ProjectExportStatus;
+};
 
 function formatTimePart(value: number) {
   return value.toString().padStart(2, "0");
@@ -37,4 +41,27 @@ export function getProjectExportVersionLabel({
   }
 
   return "Failed";
+}
+
+export function getFailedProjectExportCount(
+  exports: ProjectExportStatusRecord[],
+) {
+  return exports.filter((projectExport) => projectExport.status === "FAILED")
+    .length;
+}
+
+export function getFailedProjectExportDeleteWhere({
+  projectId,
+  orgId,
+}: {
+  projectId: string;
+  orgId: string;
+}) {
+  return {
+    projectId,
+    status: "FAILED" as const,
+    project: {
+      orgId,
+    },
+  };
 }
