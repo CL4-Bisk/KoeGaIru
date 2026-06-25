@@ -10,7 +10,6 @@ import {
   Settings,
   Sparkles,
 } from "lucide-react";
-import { formatDistanceToNow } from "date-fns";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -29,6 +28,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { VoiceAvatar } from "@/components/voice-avatar/voice-avatar";
 import { VOICE_CATEGORY_LABELS } from "@/features/voices/data/voice-categories";
 import type { AppRouter } from "@/trpc/routers/_app";
+import { ProjectAudioPreview } from "./project-audio-preview";
 
 type Project = inferRouterOutputs<AppRouter>["projects"]["getById"];
 type ProjectBlock = Project["blocks"][number];
@@ -236,33 +236,16 @@ export function ProjectBlockSettingsPanel({
                 </div>
 
                 {selectedBlock.generation ? (
-                  <div className="flex flex-col gap-3">
-                    <audio
-                      controls
-                      preload="metadata"
-                      src={selectedBlock.generation.audioUrl}
-                      className="w-full"
-                    />
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <VoiceAvatar
-                        seed={
-                          selectedBlock.generation.voiceId ??
-                          selectedBlock.generation.voiceName
-                        }
-                        name={selectedBlock.generation.voiceName}
-                      />
-                      <span className="truncate">
-                        {selectedBlock.generation.voiceName}
-                      </span>
-                      <span>&middot;</span>
-                      <span>
-                        {formatDistanceToNow(
-                          new Date(selectedBlock.generation.createdAt),
-                          { addSuffix: true },
-                        )}
-                      </span>
-                    </div>
-                  </div>
+                  <ProjectAudioPreview
+                    audioUrl={selectedBlock.generation.audioUrl}
+                    text={selectedBlock.generation.text}
+                    voice={{
+                      id: selectedBlock.generation.voiceId,
+                      name: selectedBlock.generation.voiceName,
+                    }}
+                    compact
+                    className="border-muted bg-muted/20"
+                  />
                 ) : (
                   <div className="rounded-md border border-dashed bg-muted/30 p-4 text-sm text-muted-foreground">
                     No generated audio yet.

@@ -44,6 +44,7 @@ import {
   useUpdateMyPresence,
 } from "@/features/collaborative-audio/lib/realtime";
 import { ProjectBlockSettingsPanel } from "@/features/projects/components/project-block-settings-panel";
+import { ProjectAudioPreview } from "@/features/projects/components/project-audio-preview";
 import { ProjectTimeline } from "@/features/projects/components/project-timeline";
 import { reorderBlockIds } from "@/features/projects/lib/reorder-blocks";
 import { useTRPC } from "@/trpc/client";
@@ -688,12 +689,14 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
                         {block.text}
                       </p>
                       {block.generation && (
-                        <audio
-                          controls
-                          preload="metadata"
-                          src={block.generation.audioUrl}
-                          className="w-full"
-                          onClick={(event) => event.stopPropagation()}
+                        <ProjectAudioPreview
+                          audioUrl={block.generation.audioUrl}
+                          text={block.generation.text}
+                          voice={{
+                            id: block.generation.voiceId,
+                            name: block.generation.voiceName,
+                          }}
+                          compact
                         />
                       )}
                     </div>
