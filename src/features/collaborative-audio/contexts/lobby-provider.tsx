@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode } from "react";
+import { type ReactNode, useEffect } from "react";
 import { useAuth } from "@clerk/nextjs";
 
 import { initialPresence, RoomProvider } from "../lib/realtime";
@@ -10,8 +10,44 @@ type LobbyProviderProps = {
   children: ReactNode;
 };
 
+const LIVEBLOCKS_BRANDING_SELECTORS = [
+  ".lb-composer-attribution",
+  "#liveblocks-badge",
+  "#liveblocks-badge-hide-button",
+  'a[href="https://lblcks.io/badge"]',
+];
+
 export function LobbyProvider({ projectId, children }: LobbyProviderProps) {
   const { isLoaded, orgId } = useAuth();
+
+  useEffect(() => {
+    const hideLiveblocksBranding = () => {
+      for (const selector of LIVEBLOCKS_BRANDING_SELECTORS) {
+        for (const element of document.querySelectorAll(selector)) {
+          element.setAttribute("hidden", "");
+
+          if (element instanceof HTMLElement) {
+            element.style.setProperty("display", "none", "important");
+            element.style.setProperty("visibility", "hidden", "important");
+            element.style.setProperty("pointer-events", "none", "important");
+          }
+        }
+      }
+    };
+
+    hideLiveblocksBranding();
+
+    if (!document.body) {
+      return;
+    }
+
+    const observer = new MutationObserver(hideLiveblocksBranding);
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
 
   if (!isLoaded) {
     return null;
