@@ -6,7 +6,7 @@ const adapter = new PrismaPg({
   connectionString: env.DATABASE_URL,
 });
 
-const PRISMA_CLIENT_SCHEMA_VERSION = "20260624121558_add_project_block_collaboration";
+const PRISMA_CLIENT_SCHEMA_VERSION = "20260626090000_add_project_notifications";
 
 const globalForPrisma = global as unknown as {
   prisma?: PrismaClient;
