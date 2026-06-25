@@ -11,6 +11,7 @@ import { AudioLines, Clock, GripVertical } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import type { AppRouter } from "@/trpc/routers/_app";
+import { getTimelineWaveformAudioUrl } from "../lib/timeline-waveform";
 import {
   calculateTimelineDurationMs,
   calculateTimelineStartMs,
@@ -20,6 +21,7 @@ import {
   getTimelineWidthPercent,
   TIMELINE_DURATION_MS,
 } from "../lib/timeline-position";
+import { ProjectTimelineWaveform } from "./project-timeline-waveform";
 
 type Project = inferRouterOutputs<AppRouter>["projects"]["getById"];
 type ProjectBlock = Project["blocks"][number];
@@ -191,6 +193,9 @@ export function ProjectTimeline({
               const isSelected = selectedBlockId === block.id;
               const isDragging = draggingTimelineBlockId === block.id;
               const isResizing = resizeState?.blockId === block.id;
+              const waveformAudioUrl = getTimelineWaveformAudioUrl(
+                block.generation,
+              );
 
               return (
                 <div
@@ -247,10 +252,16 @@ export function ProjectTimeline({
                         transform: "translateY(-50%)",
                       }}
                     >
+                      {waveformAudioUrl && (
+                        <ProjectTimelineWaveform
+                          audioUrl={waveformAudioUrl}
+                          isSelected={isSelected}
+                        />
+                      )}
                       <button
                         type="button"
                         draggable={!isBusy && !isResizing}
-                        className="flex min-w-0 flex-1 cursor-grab items-center gap-2 px-3 active:cursor-grabbing"
+                        className="relative z-10 flex min-w-0 flex-1 cursor-grab items-center gap-2 px-3 active:cursor-grabbing"
                         onClick={() => onSelectBlock(block.id)}
                         onDragStart={(event) =>
                           handleDragStart(event, block.id)
@@ -274,7 +285,7 @@ export function ProjectTimeline({
                       />
                       <button
                         type="button"
-                        className="h-6 w-3 shrink-0 cursor-ew-resize rounded-sm hover:bg-background/20"
+                        className="relative z-10 h-6 w-3 shrink-0 cursor-ew-resize rounded-sm hover:bg-background/20"
                         disabled={isBusy}
                         onPointerDown={(event) =>
                           handleResizeStart(event, block)
