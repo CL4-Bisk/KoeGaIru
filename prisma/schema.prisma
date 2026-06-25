@@ -33,6 +33,20 @@ enum VoiceCategory {
   CORPORATE
 }
 
+enum ProjectBlockStatus {
+  DRAFT
+  EDITING
+  GENERATING
+  GENERATED
+  FAILED
+}
+
+enum ProjectExportStatus {
+  PROCESSING
+  READY
+  FAILED
+}
+
 model Voice {
   id String @id @default(cuid())
 
@@ -45,7 +59,8 @@ model Voice {
   variant     VoiceVariant
   r2ObjectKey String?
 
-  generations Generation[]
+  generations   Generation[]
+  projectBlocks ProjectBlock[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -70,9 +85,84 @@ model Generation {
   topK              Int
   repetitionPenalty Float
 
+  projectBlocks ProjectBlock[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([orgId])
   @@index([voiceId])
+}
+
+model Project {
+  id String @id @default(cuid())
+
+  orgId String
+
+  name        String
+  description String?
+
+  blocks ProjectBlock[]
+  exports ProjectExport[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orgId])
+}
+
+model ProjectBlock {
+  id String @id @default(cuid())
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  order              Int
+  timelineStartMs    Int  @default(0)
+  timelineDurationMs Int?
+
+  text     String
+  revision Int    @default(1)
+
+  lockOwnerId   String?
+  lockedAt      DateTime?
+  lockExpiresAt DateTime?
+
+  status ProjectBlockStatus @default(DRAFT)
+
+  voiceId String?
+  voice   Voice?  @relation(fields: [voiceId], references: [id], onDelete: SetNull)
+
+  generationId String?
+  generation   Generation? @relation(fields: [generationId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId])
+  @@index([voiceId])
+  @@index([generationId])
+  @@index([lockOwnerId])
+  @@index([lockExpiresAt])
+}
+
+model ProjectExport {
+  id String @id @default(cuid())
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  status       ProjectExportStatus @default(PROCESSING)
+  r2ObjectKey  String?
+  fileName     String
+  contentType  String              @default("audio/wav")
+  durationMs   Int?
+  errorMessage String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId])
+  @@index([status])
+  @@index([createdAt])
 }

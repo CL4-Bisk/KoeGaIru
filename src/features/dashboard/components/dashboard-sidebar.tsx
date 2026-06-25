@@ -34,11 +34,15 @@ import {
   Volume2,
   Settings,
   Headphones,
+  FolderKanban,
+  Moon,
+  Sun,
 } from "lucide-react";
 import Link from "next/link";
 import { UsageContainer } from "@/features/billing/components/usage-container";
 import { VoiceCreateDialog } from "@/features/voices/components/voice-create-dialog";
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
+import { useTheme } from "next-themes";
 
 interface MenuItem {
   title: string;
@@ -57,6 +61,18 @@ const logoImages = [
   {src: logoIcon, alt: "KoeGaIru Logo", width: 24, height: 24, className: "rounded-sm"},
   {src: logoFull, alt: "KoeGaIru Logo", width: 120, height: 24, className: "rounded-sm object-contain"}
 ]
+
+const subscribeToHydration = () => () => {};
+const getHydratedSnapshot = () => true;
+const getServerSnapshot = () => false;
+
+function useIsHydrated() {
+  return useSyncExternalStore(
+    subscribeToHydration,
+    getHydratedSnapshot,
+    getServerSnapshot,
+  );
+}
 
 function NavSection({ label, items, pathname }: NavSectionProps) {
   return (
@@ -81,7 +97,7 @@ function NavSection({ label, items, pathname }: NavSectionProps) {
                 }
                 onClick={item.onClick}
                 tooltip={item.title}
-                className="h-9 px-3 py-2 text-[13px] tracking-tight font-medium border border-transparent data-[active=true]:border-border data-[active=true]:shadow-[0px_1px_1px_0px_rgba(44,54,53,0.03),inset_0px_0px_0px_2px_white]"
+                className="h-9 px-3 py-2 text-[13px] tracking-tight font-medium border border-transparent data-[active=true]:border-border data-[active=true]:shadow-[0px_1px_1px_0px_rgba(44,54,53,0.03),inset_0px_0px_0px_2px_white] dark:data-[active=true]:shadow-[0px_1px_1px_0px_rgba(0,0,0,0.22),inset_0px_0px_0px_1px_rgba(87,215,224,0.35)]"
               >
                 {item.url ? (
                   <Link href={item.url}>
@@ -107,15 +123,24 @@ export function DashboardSidebar() {
   const pathname = usePathname();
   const clerk = useClerk();
   const { state } = useSidebar();
+  const { resolvedTheme, setTheme } = useTheme();
+  const isHydrated = useIsHydrated();
   const [voiceDialogOpen, setVoiceDialogOpen] = useState(false);
 
   const activeLogoImage = state === "collapsed" ? logoImages[0] : logoImages[1];
+  const isDark = isHydrated && resolvedTheme === "dark";
+  const ThemeIcon = isDark ? Sun : Moon;
 
   const mainMenuItems: MenuItem[] = [
     {
       title: "Dashboard",
       url: "/",
       icon: Home,
+    },
+    {
+      title: "Voice projects",
+      url: "/projects",
+      icon: FolderKanban,
     },
     {
       title: "Explore voices",
@@ -139,6 +164,11 @@ export function DashboardSidebar() {
       title: "Settings",
       icon: Settings,
       onClick: () => clerk.openOrganizationProfile(),
+    },
+    {
+      title: isDark ? "Light mode" : "Dark mode",
+      icon: ThemeIcon,
+      onClick: () => setTheme(isDark ? "light" : "dark"),
     },
     {
       title: "Help and support",
@@ -175,7 +205,7 @@ export function DashboardSidebar() {
               hidePersonal
               fallback={
                 <Skeleton
-                  className="h-8.5 w-full group-data-[collapsible=icon]:size-8 rounded-md border bg-white"
+                  className="h-8.5 w-full group-data-[collapsible=icon]:size-8 rounded-md border bg-card"
                 />
               }
               appearance={{
@@ -183,7 +213,7 @@ export function DashboardSidebar() {
                   rootBox: 
                     "w-full! group-data-[collapsible=icon]:w-auto! group-data-[collapsible=icon]:flex! group-data-[collapsible=icon]:justify-center!",
                   organizationSwitcherTrigger:
-                    "w-full! justify-between! bg-white! border! border-border! rounded-md! pl-1! pr-2! py-1! gap-3! group-data-[collapsible=icon]:w-auto! group-data-[collapsible=icon]:p-1! shadow-[0px_1px_1.5px_0px_rgba(44,54,53,0.03)]!",
+                    "w-full! justify-between! bg-card! border! border-border! rounded-md! pl-1! pr-2! py-1! gap-3! group-data-[collapsible=icon]:w-auto! group-data-[collapsible=icon]:p-1! shadow-[0px_1px_1.5px_0px_rgba(44,54,53,0.03)]!",
                   organizationPreview: "gap-2!",
                   organizationPreviewAvatarBox: "size-6! rounded-sm!",
                   organizationPreviewTextContainer: 
@@ -214,14 +244,14 @@ export function DashboardSidebar() {
             <UserButton
               showName
               fallback={
-                <Skeleton className="h-8.5 w-full group-data-[collapsible=icon]:size-8 rounded-md border border-border bg-white" />
+                <Skeleton className="h-8.5 w-full group-data-[collapsible=icon]:size-8 rounded-md border border-border bg-card" />
               }
               appearance={{
                 elements: {
                   rootBox:
                     "w-full! group-data-[collapsible=icon]:w-auto! group-data-[collapsible=icon]:flex! group-data-[collapsible=icon]:justify-center!",
                   userButtonTrigger:
-                    "w-full! justify-between! bg-white! border! border-border! rounded-md! pl-1! pr-2! py-1! shadow-[0px_1px_1.5px_0px_rgba(44,54,53,0.03)]! group-data-[collapsible=icon]:w-auto! group-data-[collapsible=icon]:p-1! group-data-[collapsible=icon]:after:hidden! [--border:color-mix(in_srgb,transparent,var(--clerk-color-neutral,#000000)_15%)]!",
+                    "w-full! justify-between! bg-card! border! border-border! rounded-md! pl-1! pr-2! py-1! shadow-[0px_1px_1.5px_0px_rgba(44,54,53,0.03)]! group-data-[collapsible=icon]:w-auto! group-data-[collapsible=icon]:p-1! group-data-[collapsible=icon]:after:hidden! [--border:color-mix(in_srgb,transparent,var(--clerk-color-neutral,#000000)_15%)]!",
                   userButtonBox: "flex-row-reverse! gap-2!",
                   userButtonOuterIdentifier: "text-[13px]! tracking-tight! font-medium! text-foreground! pl-0! group-data-[collapsible=icon]:hidden!",
                   userButtonAvatarBox: "size-6!",
