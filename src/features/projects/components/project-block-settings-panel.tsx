@@ -27,6 +27,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { VoiceAvatar } from "@/components/voice-avatar/voice-avatar";
 import { VOICE_CATEGORY_LABELS } from "@/features/voices/data/voice-categories";
+import { cn } from "@/lib/utils";
 import type { AppRouter } from "@/trpc/routers/_app";
 import { ProjectAudioPreview } from "./project-audio-preview";
 
@@ -60,6 +61,7 @@ export function ProjectBlockSettingsPanel({
   voices,
   isEditingSelectedBlock,
   isBusy,
+  className,
   onStartEdit,
   onSelectBlock,
   onVoiceChange,
@@ -70,6 +72,7 @@ export function ProjectBlockSettingsPanel({
   voices: Voices;
   isEditingSelectedBlock: boolean;
   isBusy: boolean;
+  className?: string;
   onStartEdit: (block: ProjectBlock) => void;
   onSelectBlock: (blockId: string) => void;
   onVoiceChange: (blockId: string, voiceId: string) => void;
@@ -82,7 +85,12 @@ export function ProjectBlockSettingsPanel({
     Boolean(selectedBlock?.voiceId) && isEditingSelectedBlock && !isBusy;
 
   return (
-    <aside className="flex min-h-[32rem] flex-col rounded-lg border bg-background lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)]">
+    <aside
+      className={cn(
+        "flex min-h-[32rem] flex-col rounded-lg border bg-background lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)]",
+        className,
+      )}
+    >
       <Tabs
         defaultValue="settings"
         className="flex min-h-0 flex-1 flex-col gap-y-0"
