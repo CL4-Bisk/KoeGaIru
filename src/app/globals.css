@@ -142,4 +142,7 @@
     .no-scrollbar::-webkit-scrollbar {
         display: none;
     }
+    .lb-composer-attribution {
+        display: none !important;
+    }
 }
