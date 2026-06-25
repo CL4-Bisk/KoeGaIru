@@ -49,6 +49,10 @@ import { ProjectBlockSettingsPanel } from "@/features/projects/components/projec
 import { ProjectAudioPreview } from "@/features/projects/components/project-audio-preview";
 import { ProjectTimeline } from "@/features/projects/components/project-timeline";
 import { getProjectBlockAudioStateLabel } from "@/features/projects/lib/project-audio-state";
+import {
+  formatProjectExportDuration,
+  getProjectExportVersionLabel,
+} from "@/features/projects/lib/project-export-history";
 import { reorderBlockIds } from "@/features/projects/lib/reorder-blocks";
 import { useTRPC } from "@/trpc/client";
 
@@ -108,12 +112,20 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
   const selectedBlock =
     project.blocks.find((block) => block.id === selectedBlockId) ?? null;
   const latestExport = project.exports[0] ?? null;
+  const latestExportVersionLabel = latestExport
+    ? getProjectExportVersionLabel({
+        status: latestExport.status,
+        isLatest: latestExport.isLatest,
+      })
+    : null;
   const currentGeneratedBlockCount = project.blocks.filter(
     (block) => block.audioState === "CURRENT",
   ).length;
   const staleGeneratedBlockCount = project.blocks.filter(
     (block) => block.audioState === "STALE",
   ).length;
+  const canExportProjectAudio =
+    currentGeneratedBlockCount > 0 && staleGeneratedBlockCount === 0;
 
   const invalidateProject = () =>
     queryClient.invalidateQueries({
@@ -563,7 +575,7 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
               <Button type="button" variant="outline" size="sm" asChild>
                 <a href={latestExport.audioUrl}>
                   <Download className="size-4" />
-                  Download export
+                  Download latest
                 </a>
               </Button>
             )}
@@ -571,21 +583,23 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
               type="button"
               size="sm"
               disabled={
-                exportProjectAudio.isPending ||
-                currentGeneratedBlockCount === 0 ||
-                staleGeneratedBlockCount > 0
+                exportProjectAudio.isPending || !canExportProjectAudio
               }
               onClick={handleExportProjectAudio}
             >
               <Download className="size-4" />
-              {exportProjectAudio.isPending ? "Exporting..." : "Export audio"}
+              {exportProjectAudio.isPending
+                ? "Exporting..."
+                : latestExport?.status === "READY" && !latestExport.isLatest
+                  ? "Export again"
+                  : "Export audio"}
             </Button>
           </div>
           {latestExport && (
             <p className="text-xs text-muted-foreground">
-              Latest export: {latestExport.status.toLowerCase()}
-              {latestExport.status === "READY"
-                ? ` - ${latestExport.isLatest ? "latest" : "outdated"}`
+              Latest export: {latestExportVersionLabel}
+              {latestExport.durationMs !== null
+                ? ` - ${formatProjectExportDuration(latestExport.durationMs)}`
                 : ""}
               {latestExport.errorMessage ? ` - ${latestExport.errorMessage}` : ""}
             </p>
@@ -832,6 +846,9 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
             onVoiceChange={handleUpdateBlockVoice}
             onGenerate={handleGenerateBlockAudio}
             onRestoreGeneration={handleRestoreBlockGeneration}
+            canExportProjectAudio={canExportProjectAudio}
+            isExportingProjectAudio={exportProjectAudio.isPending}
+            onExportProjectAudio={handleExportProjectAudio}
           />
         </div>
       )}

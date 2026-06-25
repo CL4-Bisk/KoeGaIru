@@ -29,6 +29,10 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { VoiceAvatar } from "@/components/voice-avatar/voice-avatar";
 import { getProjectBlockAudioStateLabel } from "@/features/projects/lib/project-audio-state";
+import {
+  formatProjectExportDuration,
+  getProjectExportVersionLabel,
+} from "@/features/projects/lib/project-export-history";
 import { VOICE_CATEGORY_LABELS } from "@/features/voices/data/voice-categories";
 import { cn } from "@/lib/utils";
 import type { AppRouter } from "@/trpc/routers/_app";
@@ -70,6 +74,9 @@ export function ProjectBlockSettingsPanel({
   onVoiceChange,
   onGenerate,
   onRestoreGeneration,
+  canExportProjectAudio,
+  isExportingProjectAudio,
+  onExportProjectAudio,
 }: {
   project: Project;
   selectedBlock: ProjectBlock | null;
@@ -82,12 +89,18 @@ export function ProjectBlockSettingsPanel({
   onVoiceChange: (blockId: string, voiceId: string) => void;
   onGenerate: (blockId: string) => void;
   onRestoreGeneration: (blockId: string, historyId: string) => void;
+  canExportProjectAudio: boolean;
+  isExportingProjectAudio: boolean;
+  onExportProjectAudio: () => void;
 }) {
   const allVoices = [...voices.custom, ...voices.system];
   const selectedVoice =
     selectedBlock?.voice ?? findVoice(allVoices, selectedBlock?.voiceId ?? null);
   const canGenerate =
     Boolean(selectedBlock?.voiceId) && isEditingSelectedBlock && !isBusy;
+  const latestExport = project.exports[0] ?? null;
+  const latestExportIsOutdated =
+    latestExport?.status === "READY" && !latestExport.isLatest;
 
   return (
     <aside
@@ -295,12 +308,27 @@ export function ProjectBlockSettingsPanel({
           <div className="flex flex-col gap-4 p-2">
             <div className="flex flex-col gap-1">
               <div className="px-2 py-2">
-                <p className="text-sm font-semibold">Project exports</p>
-                <p className="text-xs text-muted-foreground">
-                  {project.exports.length} export
-                  {project.exports.length === 1 ? "" : "s"} saved for this
-                  project.
-                </p>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold">Project exports</p>
+                    <p className="text-xs text-muted-foreground">
+                      {project.exports.length} export
+                      {project.exports.length === 1 ? "" : "s"} saved for this
+                      project.
+                    </p>
+                  </div>
+                  {latestExportIsOutdated && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={!canExportProjectAudio || isExportingProjectAudio}
+                      onClick={onExportProjectAudio}
+                    >
+                      <Download className="size-4" />
+                      {isExportingProjectAudio ? "Exporting..." : "Export again"}
+                    </Button>
+                  )}
+                </div>
               </div>
 
               {project.exports.length === 0 ? (
@@ -321,23 +349,38 @@ export function ProjectBlockSettingsPanel({
                         <p className="mt-1 text-xs text-muted-foreground">
                           {new Date(projectExport.createdAt).toLocaleString()}
                         </p>
+                        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                          <span>
+                            {formatProjectExportDuration(
+                              projectExport.durationMs,
+                            )}
+                          </span>
+                          <span>&middot;</span>
+                          <span>{projectExport.contentType}</span>
+                        </div>
                       </div>
                       <div className="flex shrink-0 flex-col items-end gap-1">
                         <Badge variant="outline">{projectExport.status}</Badge>
-                        {projectExport.status === "READY" && (
-                          <Badge
-                            variant={
-                              projectExport.isLatest ? "secondary" : "outline"
-                            }
-                          >
-                            {projectExport.isLatest ? "Latest" : "Outdated"}
-                          </Badge>
-                        )}
+                        <Badge
+                          variant={
+                            projectExport.status === "READY" &&
+                            projectExport.isLatest
+                              ? "secondary"
+                              : projectExport.status === "FAILED"
+                                ? "destructive"
+                                : "outline"
+                          }
+                        >
+                          {getProjectExportVersionLabel({
+                            status: projectExport.status,
+                            isLatest: projectExport.isLatest,
+                          })}
+                        </Badge>
                       </div>
                     </div>
 
                     {projectExport.errorMessage && (
-                      <p className="mt-2 text-xs text-destructive">
+                      <p className="mt-2 line-clamp-2 rounded-md bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
                         {projectExport.errorMessage}
                       </p>
                     )}
