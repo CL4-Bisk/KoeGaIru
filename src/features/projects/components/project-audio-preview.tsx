@@ -1,10 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { Download, Pause, Play, Redo, Undo } from "lucide-react";
+import { ChevronDown, Download, Pause, Play, Redo, Undo } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { Spinner } from "@/components/ui/spinner";
 import { VoiceAvatar } from "@/components/voice-avatar/voice-avatar";
 import { useWaveSurfer } from "@/features/text-to-speech/hooks/use-wavesurfer";
@@ -41,28 +46,18 @@ export function ProjectAudioPreview({
   text,
   voice,
   compact = false,
+  defaultOpen = false,
   className,
 }: {
   audioUrl: string;
   text: string;
   voice: ProjectAudioPreviewVoice | null;
   compact?: boolean;
+  defaultOpen?: boolean;
   className?: string;
 }) {
   const [isDownloading, setIsDownloading] = useState(false);
-  const {
-    containerRef,
-    isPlaying,
-    isReady,
-    currentTime,
-    duration,
-    togglePlayPause,
-    seekBackward,
-    seekForward,
-  } = useWaveSurfer({
-    url: audioUrl,
-    autoplay: false,
-  });
+  const [open, setOpen] = useState(defaultOpen);
 
   const handleDownload = () => {
     setIsDownloading(true);
@@ -78,14 +73,89 @@ export function ProjectAudioPreview({
   };
 
   return (
-    <div
-      className={cn(
-        "overflow-hidden rounded-lg border bg-background",
-        compact ? "p-4" : "p-5",
-        className,
-      )}
+    <Collapsible
+      open={open}
+      onOpenChange={setOpen}
+      className={cn("overflow-hidden rounded-lg border bg-background", className)}
       onClick={(event) => event.stopPropagation()}
     >
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 p-3">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium text-foreground">{text}</p>
+          {voice && (
+            <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+              <VoiceAvatar
+                seed={voice.id ?? voice.name}
+                name={voice.name}
+                className="shrink-0"
+              />
+              <span className="truncate">{voice.name}</span>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <CollapsibleTrigger asChild>
+            <Button type="button" variant="outline" size="sm">
+              <ChevronDown
+                className={cn(
+                  "size-4 transition-transform",
+                  open && "rotate-180",
+                )}
+              />
+              Audio
+            </Button>
+          </CollapsibleTrigger>
+        </div>
+      </div>
+
+      <CollapsibleContent>
+        {open && (
+          <ProjectAudioPreviewPlayer
+            audioUrl={audioUrl}
+            text={text}
+            voice={voice}
+            compact={compact}
+            isDownloading={isDownloading}
+            onDownload={handleDownload}
+          />
+        )}
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function ProjectAudioPreviewPlayer({
+  audioUrl,
+  text,
+  voice,
+  compact,
+  isDownloading,
+  onDownload,
+}: {
+  audioUrl: string;
+  text: string;
+  voice: ProjectAudioPreviewVoice | null;
+  compact: boolean;
+  isDownloading: boolean;
+  onDownload: () => void;
+}) {
+  const {
+    containerRef,
+    isPlaying,
+    isReady,
+    currentTime,
+    duration,
+    togglePlayPause,
+    seekBackward,
+    seekForward,
+  } = useWaveSurfer({
+    url: audioUrl,
+    autoplay: false,
+  });
+
+  return (
+    <div className={cn("border-t", compact ? "p-3" : "p-5")}>
       <div
         className={cn(
           "relative flex items-center justify-center",
@@ -118,9 +188,7 @@ export function ProjectAudioPreview({
           )}
         >
           {formatTime(currentTime)}{" "}
-          <span className="text-muted-foreground">
-            / {formatTime(duration)}
-          </span>
+          <span className="text-muted-foreground">/ {formatTime(duration)}</span>
         </p>
       </div>
 
@@ -184,7 +252,7 @@ export function ProjectAudioPreview({
             variant="outline"
             size="sm"
             disabled={isDownloading}
-            onClick={handleDownload}
+            onClick={onDownload}
           >
             <Download className="size-4" />
             <span className="hidden sm:inline">Download</span>
