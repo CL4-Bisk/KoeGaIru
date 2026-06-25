@@ -85,7 +85,8 @@ model Generation {
   topK              Int
   repetitionPenalty Float
 
-  projectBlocks ProjectBlock[]
+  currentProjectBlocks  ProjectBlock[]           @relation("CurrentProjectBlockGeneration")
+  projectBlockHistory   ProjectBlockGeneration[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -134,7 +135,9 @@ model ProjectBlock {
   voice   Voice?  @relation(fields: [voiceId], references: [id], onDelete: SetNull)
 
   generationId String?
-  generation   Generation? @relation(fields: [generationId], references: [id], onDelete: SetNull)
+  generation   Generation? @relation("CurrentProjectBlockGeneration", fields: [generationId], references: [id], onDelete: SetNull)
+
+  generationHistory ProjectBlockGeneration[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -144,6 +147,22 @@ model ProjectBlock {
   @@index([generationId])
   @@index([lockOwnerId])
   @@index([lockExpiresAt])
+}
+
+model ProjectBlockGeneration {
+  id String @id @default(cuid())
+
+  blockId String
+  block   ProjectBlock @relation(fields: [blockId], references: [id], onDelete: Cascade)
+
+  generationId String
+  generation   Generation @relation(fields: [generationId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([blockId, generationId])
+  @@index([blockId, createdAt])
+  @@index([generationId])
 }
 
 model ProjectExport {
@@ -158,11 +177,13 @@ model ProjectExport {
   contentType  String              @default("audio/wav")
   durationMs   Int?
   errorMessage String?
+  sourceHash   String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([projectId])
   @@index([status])
+  @@index([sourceHash])
   @@index([createdAt])
 }

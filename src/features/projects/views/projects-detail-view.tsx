@@ -48,6 +48,7 @@ import { ProjectBlockActionBar } from "@/features/projects/components/project-bl
 import { ProjectBlockSettingsPanel } from "@/features/projects/components/project-block-settings-panel";
 import { ProjectAudioPreview } from "@/features/projects/components/project-audio-preview";
 import { ProjectTimeline } from "@/features/projects/components/project-timeline";
+import { getProjectBlockAudioStateLabel } from "@/features/projects/lib/project-audio-state";
 import { reorderBlockIds } from "@/features/projects/lib/reorder-blocks";
 import { useTRPC } from "@/trpc/client";
 
@@ -107,8 +108,11 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
   const selectedBlock =
     project.blocks.find((block) => block.id === selectedBlockId) ?? null;
   const latestExport = project.exports[0] ?? null;
-  const generatedBlockCount = project.blocks.filter(
-    (block) => !!block.generation,
+  const currentGeneratedBlockCount = project.blocks.filter(
+    (block) => block.audioState === "CURRENT",
+  ).length;
+  const staleGeneratedBlockCount = project.blocks.filter(
+    (block) => block.audioState === "STALE",
   ).length;
 
   const invalidateProject = () =>
@@ -548,7 +552,11 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
             <Button
               type="button"
               size="sm"
-              disabled={exportProjectAudio.isPending || generatedBlockCount === 0}
+              disabled={
+                exportProjectAudio.isPending ||
+                currentGeneratedBlockCount === 0 ||
+                staleGeneratedBlockCount > 0
+              }
               onClick={handleExportProjectAudio}
             >
               <Download className="size-4" />
@@ -558,7 +566,17 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
           {latestExport && (
             <p className="text-xs text-muted-foreground">
               Latest export: {latestExport.status.toLowerCase()}
+              {latestExport.status === "READY"
+                ? ` - ${latestExport.isLatest ? "latest" : "outdated"}`
+                : ""}
               {latestExport.errorMessage ? ` - ${latestExport.errorMessage}` : ""}
+            </p>
+          )}
+          {staleGeneratedBlockCount > 0 && (
+            <p className="text-xs text-destructive">
+              {staleGeneratedBlockCount} block
+              {staleGeneratedBlockCount === 1 ? "" : "s"} need regeneration
+              before export.
             </p>
           )}
         </div>
@@ -662,8 +680,16 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
                       <p className="text-sm font-medium">Block {index + 1}</p>
                       <Badge variant="outline">Text</Badge>
                       <Badge variant="secondary">{block.status}</Badge>
-                      {block.generation && (
-                        <Badge variant="outline">Audio ready</Badge>
+                      {block.audioState !== "NO_AUDIO" && (
+                        <Badge
+                          variant={
+                            block.audioState === "STALE"
+                              ? "destructive"
+                              : "outline"
+                          }
+                        >
+                          {getProjectBlockAudioStateLabel(block.audioState)}
+                        </Badge>
                       )}
                       {otherEditingUser && (
                         <Badge variant="secondary">
@@ -739,7 +765,7 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
                       <p className="whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
                         {block.text}
                       </p>
-                      {block.generation && (
+                      {block.generation && block.audioState === "CURRENT" && (
                         <ProjectAudioPreview
                           audioUrl={block.generation.audioUrl}
                           text={block.generation.text}

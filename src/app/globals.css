@@ -142,4 +142,12 @@
     .no-scrollbar::-webkit-scrollbar {
         display: none;
     }
+    .lb-composer-attribution,
+    #liveblocks-badge,
+    #liveblocks-badge-hide-button,
+    a[href="https://lblcks.io/badge"] {
+        display: none !important;
+        visibility: hidden !important;
+        pointer-events: none !important;
+    }
 }

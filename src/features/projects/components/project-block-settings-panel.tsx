@@ -4,6 +4,7 @@ import type { inferRouterOutputs } from "@trpc/server";
 import {
   AudioLines,
   Clock,
+  Download,
   History,
   Lock,
   Music2,
@@ -26,6 +27,7 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { VoiceAvatar } from "@/components/voice-avatar/voice-avatar";
+import { getProjectBlockAudioStateLabel } from "@/features/projects/lib/project-audio-state";
 import { VOICE_CATEGORY_LABELS } from "@/features/voices/data/voice-categories";
 import { cn } from "@/lib/utils";
 import type { AppRouter } from "@/trpc/routers/_app";
@@ -130,7 +132,20 @@ export function ProjectBlockSettingsPanel({
                     {selectedBlock.text}
                   </p>
                 </div>
-                <Badge variant="outline">{selectedBlock.status}</Badge>
+                <div className="flex shrink-0 flex-col items-end gap-1">
+                  <Badge variant="outline">{selectedBlock.status}</Badge>
+                  {selectedBlock.audioState !== "NO_AUDIO" && (
+                    <Badge
+                      variant={
+                        selectedBlock.audioState === "STALE"
+                          ? "destructive"
+                          : "secondary"
+                      }
+                    >
+                      {getProjectBlockAudioStateLabel(selectedBlock.audioState)}
+                    </Badge>
+                  )}
+                </div>
               </div>
 
               {!isEditingSelectedBlock && (
@@ -243,7 +258,8 @@ export function ProjectBlockSettingsPanel({
                   </Button>
                 </div>
 
-                {selectedBlock.generation ? (
+                {selectedBlock.generation &&
+                selectedBlock.audioState === "CURRENT" ? (
                   <ProjectAudioPreview
                     audioUrl={selectedBlock.generation.audioUrl}
                     text={selectedBlock.generation.text}
@@ -254,6 +270,11 @@ export function ProjectBlockSettingsPanel({
                     compact
                     className="border-muted bg-muted/20"
                   />
+                ) : selectedBlock.audioState === "STALE" ? (
+                  <div className="rounded-md border border-destructive/40 bg-destructive/5 p-4 text-sm text-muted-foreground">
+                    This block changed after its last generation. The old audio
+                    is saved in history, but export needs a regenerated clip.
+                  </div>
                 ) : (
                   <div className="rounded-md border border-dashed bg-muted/30 p-4 text-sm text-muted-foreground">
                     No generated audio yet.
@@ -268,7 +289,128 @@ export function ProjectBlockSettingsPanel({
           value="history"
           className="mt-0 flex min-h-0 flex-1 flex-col overflow-y-auto"
         >
-          <div className="flex flex-col gap-1 p-2">
+          <div className="flex flex-col gap-4 p-2">
+            <div className="flex flex-col gap-1">
+              <div className="px-2 py-2">
+                <p className="text-sm font-semibold">Project exports</p>
+                <p className="text-xs text-muted-foreground">
+                  {project.exports.length} export
+                  {project.exports.length === 1 ? "" : "s"} saved for this
+                  project.
+                </p>
+              </div>
+
+              {project.exports.length === 0 ? (
+                <div className="rounded-md border border-dashed bg-muted/30 p-4 text-sm text-muted-foreground">
+                  No exports yet.
+                </div>
+              ) : (
+                project.exports.map((projectExport) => (
+                  <div
+                    key={projectExport.id}
+                    className="rounded-lg border bg-background p-3"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">
+                          {projectExport.fileName}
+                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {new Date(projectExport.createdAt).toLocaleString()}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 flex-col items-end gap-1">
+                        <Badge variant="outline">{projectExport.status}</Badge>
+                        {projectExport.status === "READY" && (
+                          <Badge
+                            variant={
+                              projectExport.isLatest ? "secondary" : "outline"
+                            }
+                          >
+                            {projectExport.isLatest ? "Latest" : "Outdated"}
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+
+                    {projectExport.errorMessage && (
+                      <p className="mt-2 text-xs text-destructive">
+                        {projectExport.errorMessage}
+                      </p>
+                    )}
+
+                    {projectExport.audioUrl && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="mt-3 w-full"
+                        asChild
+                      >
+                        <a href={projectExport.audioUrl}>
+                          <Download className="size-4" />
+                          Download
+                        </a>
+                      </Button>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+
+            {selectedBlock && (
+              <div className="flex flex-col gap-1">
+                <div className="px-2 py-2">
+                  <p className="text-sm font-semibold">Selected block audio</p>
+                  <p className="text-xs text-muted-foreground">
+                    {selectedBlock.generationHistory.length} generated version
+                    {selectedBlock.generationHistory.length === 1 ? "" : "s"}.
+                  </p>
+                </div>
+
+                {selectedBlock.generationHistory.length === 0 ? (
+                  <div className="rounded-md border border-dashed bg-muted/30 p-4 text-sm text-muted-foreground">
+                    No generated audio history yet.
+                  </div>
+                ) : (
+                  selectedBlock.generationHistory.map((history) => (
+                    <div key={history.id} className="rounded-lg border p-2">
+                      <div className="mb-2 flex items-center justify-between gap-2 px-1">
+                        <p className="text-xs text-muted-foreground">
+                          {new Date(history.createdAt).toLocaleString()}
+                        </p>
+                        <Badge
+                          variant={
+                            history.isCurrent &&
+                            selectedBlock.audioState === "STALE"
+                              ? "destructive"
+                              : "outline"
+                          }
+                        >
+                          {history.isCurrent
+                            ? getProjectBlockAudioStateLabel(
+                                selectedBlock.audioState,
+                              )
+                            : "Previous"}
+                        </Badge>
+                      </div>
+                      <ProjectAudioPreview
+                        audioUrl={history.generation.audioUrl}
+                        text={history.generation.text}
+                        voice={{
+                          id: history.generation.voiceId,
+                          name: history.generation.voiceName,
+                        }}
+                        compact
+                        className="bg-muted/20"
+                      />
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+
+            <div className="flex flex-col gap-1">
             <div className="px-2 py-2">
               <p className="text-sm font-semibold">Project blocks</p>
               <p className="text-xs text-muted-foreground">
@@ -306,6 +448,7 @@ export function ProjectBlockSettingsPanel({
                 </div>
               </button>
             ))}
+            </div>
           </div>
         </TabsContent>
       </Tabs>
