@@ -1,16 +1,56 @@
 import * as Sentry from "@sentry/nextjs";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { chatterbox } from "@/lib/chatterbox-client";
 import { prisma } from "@/lib/db";
-import { uploadAudio } from "@/lib/r2";
+import { getSignedAudioUrl, uploadAudio } from "@/lib/r2";
 import { TEXT_MAX_LENGTH } from "@/features/text-to-speech/data/constants";
+import {
+  ProjectExportFfmpegError,
+  runProjectExportFfmpeg,
+} from "@/features/projects/lib/project-export-ffmpeg";
+import {
+  buildProjectExportMixFilter,
+  getExportableTimelineBlocks,
+  getProjectExportDurationMs,
+} from "@/features/projects/lib/project-export-plan";
 import { createTRPCRouter, orgProcedure } from "../init";
 
 const BLOCK_LOCK_TTL_MS = 2 * 60 * 1000;
 
 function getLockExpiry() {
   return new Date(Date.now() + BLOCK_LOCK_TTL_MS);
+}
+
+function getProjectExportDownloadUrl(exportId: string) {
+  return `/api/project-exports/${exportId}`;
+}
+
+function getSafeExportFileName(projectName: string) {
+  const safeName =
+    projectName
+      .slice(0, 50)
+      .trim()
+      .replace(/[^a-zA-Z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .toLowerCase() || "project-export";
+
+  return `${safeName}.wav`;
+}
+
+async function downloadAudioToFile(r2ObjectKey: string, filePath: string) {
+  const signedUrl = await getSignedAudioUrl(r2ObjectKey);
+  const audioResponse = await fetch(signedUrl);
+
+  if (!audioResponse.ok) {
+    throw new Error("Failed to download project block audio from R2.");
+  }
+
+  const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
+  await writeFile(filePath, audioBuffer);
 }
 
 async function ensureEditableBlock(blockId: string, orgId: string, userId: string) {
@@ -93,6 +133,10 @@ export const projectsRouter = createTRPCRouter({
               },
             },
           },
+          exports: {
+            orderBy: { createdAt: "desc" },
+            take: 5,
+          },
         },
       });
 
@@ -110,6 +154,13 @@ export const projectsRouter = createTRPCRouter({
                 audioUrl: `/api/audio/${block.generation.id}`,
               }
             : null,
+        })),
+        exports: project.exports.map((projectExport) => ({
+          ...projectExport,
+          audioUrl:
+            projectExport.status === "READY" && projectExport.r2ObjectKey
+              ? getProjectExportDownloadUrl(projectExport.id)
+              : null,
         })),
       };
     }),
@@ -542,6 +593,132 @@ export const projectsRouter = createTRPCRouter({
             : {}),
         },
       });
+    }),
+
+  exportProjectAudio: orgProcedure
+    .input(z.object({ projectId: z.string().min(1) }))
+    .mutation(async ({ input, ctx }) => {
+      const project = await prisma.project.findUnique({
+        where: {
+          id: input.projectId,
+          orgId: ctx.orgId,
+        },
+        include: {
+          blocks: {
+            orderBy: { order: "asc" },
+            include: {
+              generation: {
+                select: {
+                  r2ObjectKey: true,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      if (!project) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+
+      const exportableBlocks = getExportableTimelineBlocks(project.blocks);
+
+      if (exportableBlocks.length === 0) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Generate at least one block before exporting this project.",
+        });
+      }
+
+      const projectExport = await prisma.projectExport.create({
+        data: {
+          projectId: project.id,
+          fileName: getSafeExportFileName(project.name),
+        },
+      });
+      const tempDir = await mkdtemp(
+        path.join(os.tmpdir(), `koegairu-export-${projectExport.id}-`),
+      );
+
+      try {
+        const inputPaths = exportableBlocks.map((block, index) =>
+          path.join(tempDir, `block-${index}.wav`),
+        );
+        await Promise.all(
+          exportableBlocks.map((block, index) =>
+            downloadAudioToFile(block.r2ObjectKey, inputPaths[index]),
+          ),
+        );
+
+        const outputPath = path.join(tempDir, "project-export.wav");
+        const { filter, outputLabel } =
+          buildProjectExportMixFilter(exportableBlocks);
+
+        await runProjectExportFfmpeg({
+          inputPaths,
+          filter,
+          outputLabel,
+          outputPath,
+        });
+
+        const outputBuffer = await readFile(outputPath);
+        const r2ObjectKey = `project-exports/orgs/${ctx.orgId}/projects/${project.id}/${projectExport.id}.wav`;
+
+        await uploadAudio({
+          buffer: outputBuffer,
+          key: r2ObjectKey,
+          contentType: "audio/wav",
+        });
+
+        const updatedExport = await prisma.projectExport.update({
+          where: { id: projectExport.id },
+          data: {
+            status: "READY",
+            r2ObjectKey,
+            durationMs: getProjectExportDurationMs(exportableBlocks),
+          },
+        });
+
+        return {
+          ...updatedExport,
+          audioUrl: getProjectExportDownloadUrl(updatedExport.id),
+        };
+      } catch (error) {
+        const message =
+          error instanceof ProjectExportFfmpegError
+            ? error.message
+            : "Failed to export project audio.";
+
+        await prisma.projectExport
+          .update({
+            where: { id: projectExport.id },
+            data: {
+              status: "FAILED",
+              errorMessage: message,
+            },
+          })
+          .catch(() => {});
+
+        Sentry.logger.error("Project export failed", {
+          orgId: ctx.orgId,
+          projectId: project.id,
+          exportId: projectExport.id,
+          error:
+            error instanceof Error
+              ? {
+                  name: error.name,
+                  message: error.message,
+                }
+              : { message: String(error) },
+        });
+
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message,
+        });
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
+      }
     }),
 
   deleteBlock: orgProcedure
