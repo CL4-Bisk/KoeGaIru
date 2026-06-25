@@ -17,6 +17,11 @@ import {
   getExportableTimelineBlocks,
   getProjectExportDurationMs,
 } from "@/features/projects/lib/project-export-plan";
+import { getProjectBlockAudioState } from "@/features/projects/lib/project-audio-state";
+import {
+  getProjectExportSourceHash,
+  isProjectExportLatest,
+} from "@/features/projects/lib/project-export-source";
 import { createTRPCRouter, orgProcedure } from "../init";
 
 const BLOCK_LOCK_TTL_MS = 2 * 60 * 1000;
@@ -66,6 +71,7 @@ async function ensureEditableBlock(blockId: string, orgId: string, userId: strin
       id: true,
       text: true,
       voiceId: true,
+      generationId: true,
       lockOwnerId: true,
       lockExpiresAt: true,
     },
@@ -124,11 +130,32 @@ export const projectsRouter = createTRPCRouter({
                   text: true,
                   voiceId: true,
                   voiceName: true,
+                  r2ObjectKey: true,
                   temperature: true,
                   topP: true,
                   topK: true,
                   repetitionPenalty: true,
                   createdAt: true,
+                },
+              },
+              generationHistory: {
+                orderBy: { createdAt: "desc" },
+                take: 8,
+                include: {
+                  generation: {
+                    select: {
+                      id: true,
+                      text: true,
+                      voiceId: true,
+                      voiceName: true,
+                      r2ObjectKey: true,
+                      temperature: true,
+                      topP: true,
+                      topK: true,
+                      repetitionPenalty: true,
+                      createdAt: true,
+                    },
+                  },
                 },
               },
             },
@@ -144,19 +171,57 @@ export const projectsRouter = createTRPCRouter({
         throw new TRPCError({ code: "NOT_FOUND" });
       }
 
+      const currentExportSourceHash = getProjectExportSourceHash(project.blocks);
+
       return {
         ...project,
-        blocks: project.blocks.map((block) => ({
-          ...block,
-          generation: block.generation
-            ? {
-                ...block.generation,
-                audioUrl: `/api/audio/${block.generation.id}`,
-              }
-            : null,
-        })),
+        blocks: project.blocks.map((block) => {
+          const audioState = getProjectBlockAudioState(block);
+
+          return {
+            ...block,
+            audioState,
+            generation: block.generation
+              ? {
+                  id: block.generation.id,
+                  text: block.generation.text,
+                  voiceId: block.generation.voiceId,
+                  voiceName: block.generation.voiceName,
+                  temperature: block.generation.temperature,
+                  topP: block.generation.topP,
+                  topK: block.generation.topK,
+                  repetitionPenalty: block.generation.repetitionPenalty,
+                  createdAt: block.generation.createdAt,
+                  audioUrl: `/api/audio/${block.generation.id}`,
+                }
+              : null,
+            generationHistory: block.generationHistory.map((history) => ({
+              id: history.id,
+              createdAt: history.createdAt,
+              isCurrent: history.generation.id === block.generationId,
+              generation: {
+                id: history.generation.id,
+                text: history.generation.text,
+                voiceId: history.generation.voiceId,
+                voiceName: history.generation.voiceName,
+                temperature: history.generation.temperature,
+                topP: history.generation.topP,
+                topK: history.generation.topK,
+                repetitionPenalty: history.generation.repetitionPenalty,
+                createdAt: history.generation.createdAt,
+                audioUrl: `/api/audio/${history.generation.id}`,
+              },
+            })),
+          };
+        }),
         exports: project.exports.map((projectExport) => ({
           ...projectExport,
+          isLatest:
+            projectExport.status === "READY" &&
+            isProjectExportLatest(
+              projectExport.sourceHash,
+              currentExportSourceHash,
+            ),
           audioUrl:
             projectExport.status === "READY" && projectExport.r2ObjectKey
               ? getProjectExportDownloadUrl(projectExport.id)
@@ -237,9 +302,11 @@ export const projectsRouter = createTRPCRouter({
             orgId: ctx.orgId,
           },
         },
-        select: {
+          select: {
             id: true,
+            text: true,
             revision: true,
+            generationId: true,
             lockOwnerId: true,
             lockExpiresAt: true,
         },
@@ -273,6 +340,9 @@ export const projectsRouter = createTRPCRouter({
             text: input.text,
             revision: { increment: 1 },
             lockExpiresAt: getLockExpiry(),
+            ...(block.generationId && block.text !== input.text
+              ? { status: "DRAFT" as const }
+              : {}),
         },
       });
     }),
@@ -285,7 +355,11 @@ export const projectsRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ input, ctx }) => {
-      await ensureEditableBlock(input.blockId, ctx.orgId, ctx.userId);
+      const block = await ensureEditableBlock(
+        input.blockId,
+        ctx.orgId,
+        ctx.userId,
+      );
 
       const voice = await prisma.voice.findUnique({
         where: {
@@ -311,6 +385,9 @@ export const projectsRouter = createTRPCRouter({
           voiceId: voice.id,
           revision: { increment: 1 },
           lockExpiresAt: getLockExpiry(),
+          ...(block.generationId && block.voiceId !== voice.id
+            ? { status: "DRAFT" as const }
+            : {}),
         },
       });
     }),
@@ -435,14 +512,30 @@ export const projectsRouter = createTRPCRouter({
           data: { r2ObjectKey },
         });
 
-        return prisma.projectBlock.update({
-          where: { id: block.id },
-          data: {
-            generationId: generation.id,
-            status: "GENERATED",
-            revision: { increment: 1 },
-            lockExpiresAt: getLockExpiry(),
-          },
+        return prisma.$transaction(async (tx) => {
+          await tx.projectBlockGeneration.upsert({
+            where: {
+              blockId_generationId: {
+                blockId: block.id,
+                generationId: generation.id,
+              },
+            },
+            create: {
+              blockId: block.id,
+              generationId: generation.id,
+            },
+            update: {},
+          });
+
+          return tx.projectBlock.update({
+            where: { id: block.id },
+            data: {
+              generationId: generation.id,
+              status: "GENERATED",
+              revision: { increment: 1 },
+              lockExpiresAt: getLockExpiry(),
+            },
+          });
         });
       } catch (error) {
         if (generationId) {
@@ -609,6 +702,9 @@ export const projectsRouter = createTRPCRouter({
             include: {
               generation: {
                 select: {
+                  id: true,
+                  text: true,
+                  voiceId: true,
                   r2ObjectKey: true,
                 },
               },
@@ -622,6 +718,17 @@ export const projectsRouter = createTRPCRouter({
       }
 
       const exportableBlocks = getExportableTimelineBlocks(project.blocks);
+      const staleBlocks = project.blocks.filter(
+        (block) => getProjectBlockAudioState(block) === "STALE",
+      );
+
+      if (staleBlocks.length > 0) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message:
+            "One or more blocks need regeneration before exporting this project.",
+        });
+      }
 
       if (exportableBlocks.length === 0) {
         throw new TRPCError({
@@ -631,11 +738,12 @@ export const projectsRouter = createTRPCRouter({
       }
 
       const projectExport = await prisma.projectExport.create({
-        data: {
-          projectId: project.id,
-          fileName: getSafeExportFileName(project.name),
-        },
-      });
+          data: {
+            projectId: project.id,
+            fileName: getSafeExportFileName(project.name),
+            sourceHash: getProjectExportSourceHash(project.blocks),
+          },
+        });
       const tempDir = await mkdtemp(
         path.join(os.tmpdir(), `koegairu-export-${projectExport.id}-`),
       );
