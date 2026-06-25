@@ -138,6 +138,7 @@ model ProjectBlock {
   generation   Generation? @relation("CurrentProjectBlockGeneration", fields: [generationId], references: [id], onDelete: SetNull)
 
   generationHistory ProjectBlockGeneration[]
+  comments          ProjectComment[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -147,6 +148,30 @@ model ProjectBlock {
   @@index([generationId])
   @@index([lockOwnerId])
   @@index([lockExpiresAt])
+}
+
+model ProjectComment {
+  id String @id @default(cuid())
+
+  orgId String
+
+  blockId String
+  block   ProjectBlock @relation(fields: [blockId], references: [id], onDelete: Cascade)
+
+  authorId   String
+  authorName String
+
+  body               String
+  mentionedUsernames String[] @default([])
+  isResolved         Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orgId])
+  @@index([blockId, createdAt])
+  @@index([authorId])
+  @@index([isResolved])
 }
 
 model ProjectBlockGeneration {
