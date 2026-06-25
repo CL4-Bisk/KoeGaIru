@@ -1,12 +1,15 @@
 "use client";
 
+import { type FormEvent, useState } from "react";
 import type { inferRouterOutputs } from "@trpc/server";
 import {
   AudioLines,
+  CheckCircle2,
   Clock,
   Download,
   History,
   Lock,
+  MessageCircle,
   Music2,
   RotateCcw,
   Settings,
@@ -27,6 +30,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import { VoiceAvatar } from "@/components/voice-avatar/voice-avatar";
 import { getProjectBlockAudioStateLabel } from "@/features/projects/lib/project-audio-state";
 import {
@@ -76,7 +80,10 @@ export function ProjectBlockSettingsPanel({
   onRestoreGeneration,
   canExportProjectAudio,
   isExportingProjectAudio,
+  isCommentActionPending,
   onExportProjectAudio,
+  onCreateComment,
+  onSetCommentResolved,
 }: {
   project: Project;
   selectedBlock: ProjectBlock | null;
@@ -91,8 +98,12 @@ export function ProjectBlockSettingsPanel({
   onRestoreGeneration: (blockId: string, historyId: string) => void;
   canExportProjectAudio: boolean;
   isExportingProjectAudio: boolean;
+  isCommentActionPending: boolean;
   onExportProjectAudio: () => void;
+  onCreateComment: (blockId: string, body: string) => void;
+  onSetCommentResolved: (commentId: string, isResolved: boolean) => void;
 }) {
+  const [commentBody, setCommentBody] = useState("");
   const allVoices = [...voices.custom, ...voices.system];
   const selectedVoice =
     selectedBlock?.voice ?? findVoice(allVoices, selectedBlock?.voiceId ?? null);
@@ -101,6 +112,21 @@ export function ProjectBlockSettingsPanel({
   const latestExport = project.exports[0] ?? null;
   const latestExportIsOutdated =
     latestExport?.status === "READY" && !latestExport.isLatest;
+  const selectedComments = selectedBlock?.comments ?? [];
+  const unresolvedCommentCount = selectedComments.filter(
+    (comment) => !comment.isResolved,
+  ).length;
+
+  const handleCreateComment = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!selectedBlock || !commentBody.trim()) {
+      return;
+    }
+
+    onCreateComment(selectedBlock.id, commentBody);
+    setCommentBody("");
+  };
 
   return (
     <aside
@@ -117,6 +143,10 @@ export function ProjectBlockSettingsPanel({
           <TabsTrigger value="settings" className={tabTriggerClassName}>
             <Settings className="size-4" />
             Settings
+          </TabsTrigger>
+          <TabsTrigger value="comments" className={tabTriggerClassName}>
+            <MessageCircle className="size-4" />
+            Comments
           </TabsTrigger>
           <TabsTrigger value="history" className={tabTriggerClassName}>
             <History className="size-4" />
@@ -297,6 +327,115 @@ export function ProjectBlockSettingsPanel({
                   </div>
                 )}
               </div>
+            </div>
+          )}
+        </TabsContent>
+
+        <TabsContent
+          value="comments"
+          className="mt-0 flex min-h-0 flex-1 flex-col overflow-y-auto"
+        >
+          {!selectedBlock ? (
+            <div className="flex flex-1 flex-col items-center justify-center gap-2 p-8 text-center">
+              <div className="rounded-full bg-muted p-3">
+                <MessageCircle className="size-5 text-muted-foreground" />
+              </div>
+              <p className="font-semibold tracking-tight">Select a block</p>
+              <p className="max-w-56 text-sm text-muted-foreground">
+                Comments are attached to the selected script block.
+              </p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-4 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold">Block comments</p>
+                  <p className="line-clamp-2 text-sm text-muted-foreground">
+                    {selectedBlock.text}
+                  </p>
+                </div>
+                <Badge variant={unresolvedCommentCount > 0 ? "secondary" : "outline"}>
+                  {unresolvedCommentCount} open
+                </Badge>
+              </div>
+
+              <form onSubmit={handleCreateComment} className="flex flex-col gap-3">
+                <Textarea
+                  value={commentBody}
+                  onChange={(event) => setCommentBody(event.target.value)}
+                  placeholder="Add a comment..."
+                  className="min-h-24"
+                />
+                <div className="flex justify-end">
+                  <Button
+                    type="submit"
+                    size="sm"
+                    disabled={isCommentActionPending || !commentBody.trim()}
+                  >
+                    <MessageCircle className="size-4" />
+                    Comment
+                  </Button>
+                </div>
+              </form>
+
+              {selectedComments.length === 0 ? (
+                <div className="rounded-md border border-dashed bg-muted/30 p-4 text-sm text-muted-foreground">
+                  No comments yet.
+                </div>
+              ) : (
+                <div className="flex flex-col gap-3">
+                  {selectedComments.map((comment) => (
+                    <div key={comment.id} className="rounded-lg border p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium">
+                            {comment.authorName}
+                          </p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {new Date(comment.createdAt).toLocaleString()}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <Badge
+                            variant={comment.isResolved ? "outline" : "secondary"}
+                          >
+                            {comment.isResolved ? "Resolved" : "Open"}
+                          </Badge>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={isCommentActionPending}
+                            onClick={() =>
+                              onSetCommentResolved(
+                                comment.id,
+                                !comment.isResolved,
+                              )
+                            }
+                          >
+                            <CheckCircle2 className="size-4" />
+                            {comment.isResolved ? "Reopen" : "Resolve"}
+                          </Button>
+                        </div>
+                      </div>
+
+                      <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
+                        {comment.body}
+                      </p>
+
+                      {comment.mentionedUsernames.length > 0 && (
+                        <div className="mt-3 flex flex-wrap gap-1.5">
+                          {comment.mentionedUsernames.map((username) => (
+                            <Badge key={username} variant="outline">
+                              @{username}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </TabsContent>

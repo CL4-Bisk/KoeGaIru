@@ -204,6 +204,30 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
     }),
   );
 
+  const createBlockComment = useMutation(
+    trpc.projects.createBlockComment.mutationOptions({
+      onSuccess: async () => {
+        await invalidateProject();
+        toast.success("Comment added");
+      },
+      onError: (error) => {
+        toast.error(error.message);
+      },
+    }),
+  );
+
+  const setBlockCommentResolved = useMutation(
+    trpc.projects.setBlockCommentResolved.mutationOptions({
+      onSuccess: async (_comment, variables) => {
+        await invalidateProject();
+        toast.success(variables.isResolved ? "Comment resolved" : "Comment reopened");
+      },
+      onError: (error) => {
+        toast.error(error.message);
+      },
+    }),
+  );
+
   const reorderProjectBlocks = useMutation(
     trpc.projects.reorderBlocks.mutationOptions({
       onSuccess: async () => {
@@ -418,6 +442,17 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
     restoreBlockGeneration.mutate({ blockId, historyId });
   };
 
+  const handleCreateBlockComment = (blockId: string, body: string) => {
+    createBlockComment.mutate({ blockId, body });
+  };
+
+  const handleSetBlockCommentResolved = (
+    commentId: string,
+    isResolved: boolean,
+  ) => {
+    setBlockCommentResolved.mutate({ commentId, isResolved });
+  };
+
   const handleBlockDragStart = (
     event: DragEvent<HTMLButtonElement>,
     blockId: string,
@@ -548,6 +583,8 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
     exportProjectAudio.isPending ||
     deleteBlock.isPending ||
     releaseBlockLock.isPending;
+  const isCommentActionPending =
+    createBlockComment.isPending || setBlockCommentResolved.isPending;
 
   return (
     <div
@@ -848,7 +885,10 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
             onRestoreGeneration={handleRestoreBlockGeneration}
             canExportProjectAudio={canExportProjectAudio}
             isExportingProjectAudio={exportProjectAudio.isPending}
+            isCommentActionPending={isCommentActionPending}
             onExportProjectAudio={handleExportProjectAudio}
+            onCreateComment={handleCreateBlockComment}
+            onSetCommentResolved={handleSetBlockCommentResolved}
           />
         </div>
       )}

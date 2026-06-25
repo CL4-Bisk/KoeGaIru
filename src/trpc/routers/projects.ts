@@ -1,4 +1,5 @@
 import * as Sentry from "@sentry/nextjs";
+import { currentUser } from "@clerk/nextjs/server";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -25,6 +26,7 @@ import {
   getProjectExportSourceHash,
   isProjectExportLatest,
 } from "@/features/projects/lib/project-export-source";
+import { getProjectCommentCreateData } from "@/features/projects/lib/project-comments";
 import { createTRPCRouter, orgProcedure } from "../init";
 
 const BLOCK_LOCK_TTL_MS = 2 * 60 * 1000;
@@ -59,6 +61,17 @@ async function downloadAudioToFile(r2ObjectKey: string, filePath: string) {
 
   const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
   await writeFile(filePath, audioBuffer);
+}
+
+async function getCommentAuthorName(userId: string) {
+  const user = await currentUser().catch(() => null);
+
+  return (
+    user?.fullName ??
+    user?.username ??
+    user?.primaryEmailAddress?.emailAddress ??
+    userId
+  );
 }
 
 async function ensureEditableBlock(blockId: string, orgId: string, userId: string) {
@@ -160,6 +173,10 @@ export const projectsRouter = createTRPCRouter({
                     },
                   },
                 },
+              },
+              comments: {
+                orderBy: { createdAt: "desc" },
+                take: 50,
               },
             },
           },
@@ -903,6 +920,65 @@ export const projectsRouter = createTRPCRouter({
 
       return prisma.projectBlock.delete({
         where: { id: input.blockId },
+      });
+    }),
+
+  createBlockComment: orgProcedure
+    .input(
+      z.object({
+        blockId: z.string().min(1),
+        body: z.string().trim().min(1).max(1000),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      const block = await prisma.projectBlock.findFirst({
+        where: {
+          id: input.blockId,
+          project: {
+            orgId: ctx.orgId,
+          },
+        },
+        select: { id: true },
+      });
+
+      if (!block) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+
+      return prisma.projectComment.create({
+        data: getProjectCommentCreateData({
+          blockId: block.id,
+          orgId: ctx.orgId,
+          authorId: ctx.userId,
+          authorName: await getCommentAuthorName(ctx.userId),
+          body: input.body,
+        }),
+      });
+    }),
+
+  setBlockCommentResolved: orgProcedure
+    .input(
+      z.object({
+        commentId: z.string().min(1),
+        isResolved: z.boolean(),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      const comment = await prisma.projectComment.findFirst({
+        where: {
+          id: input.commentId,
+          orgId: ctx.orgId,
+        },
+        select: { id: true },
+      });
+
+      if (!comment) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+
+      return prisma.projectComment.update({
+        where: { id: comment.id },
+        data: { isResolved: input.isResolved },
       });
     }),
 
