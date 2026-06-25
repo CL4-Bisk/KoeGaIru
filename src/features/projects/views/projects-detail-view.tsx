@@ -48,6 +48,7 @@ import {
 import { ProjectBlockActionBar } from "@/features/projects/components/project-block-action-bar";
 import { ProjectBlockSettingsPanel } from "@/features/projects/components/project-block-settings-panel";
 import { ProjectAudioPreview } from "@/features/projects/components/project-audio-preview";
+import { ProjectNotificationsMenu } from "@/features/projects/components/project-notifications-menu";
 import { ProjectTimeline } from "@/features/projects/components/project-timeline";
 import { getProjectBlockAudioStateLabel } from "@/features/projects/lib/project-audio-state";
 import { getProjectCommentMentionSuggestions } from "@/features/projects/lib/project-comments";
@@ -104,9 +105,10 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
   >(null);
   const editingBlockIdRef = useRef<string | null>(null);
 
-  const { data: project } = useSuspenseQuery(
-    trpc.projects.getById.queryOptions({ id: projectId }),
-  );
+  const { data: project } = useSuspenseQuery({
+    ...trpc.projects.getById.queryOptions({ id: projectId }),
+    refetchInterval: 5000,
+  });
 
   const { data: voices } = useSuspenseQuery(
     trpc.voices.getAll.queryOptions(),
@@ -232,6 +234,17 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
       onSuccess: async (_comment, variables) => {
         await invalidateProject();
         toast.success(variables.isResolved ? "Comment resolved" : "Comment reopened");
+      },
+      onError: (error) => {
+        toast.error(error.message);
+      },
+    }),
+  );
+
+  const markProjectNotificationsRead = useMutation(
+    trpc.projects.markProjectNotificationsRead.mutationOptions({
+      onSuccess: async () => {
+        await invalidateProject();
       },
       onError: (error) => {
         toast.error(error.message);
@@ -480,6 +493,17 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
     setBlockCommentResolved.mutate({ commentId, isResolved });
   };
 
+  const handleOpenProjectNotifications = () => {
+    if (
+      markProjectNotificationsRead.isPending ||
+      project.notifications.every((notification) => notification.isRead)
+    ) {
+      return;
+    }
+
+    markProjectNotificationsRead.mutate({ projectId });
+  };
+
   const handleBlockDragStart = (
     event: DragEvent<HTMLButtonElement>,
     blockId: string,
@@ -645,7 +669,15 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
         </div>
 
         <div className="flex flex-col items-start gap-2 sm:items-end">
-          <ActiveCollaborators />
+          <div className="flex items-center gap-2">
+            <ProjectNotificationsMenu
+              notifications={project.notifications}
+              isMarkingRead={markProjectNotificationsRead.isPending}
+              onOpen={handleOpenProjectNotifications}
+              onSelectBlock={handleSelectBlock}
+            />
+            <ActiveCollaborators />
+          </div>
           <div className="flex flex-wrap items-center gap-2">
             {latestExport?.audioUrl && (
               <Button type="button" variant="outline" size="sm" asChild>
