@@ -18,6 +18,7 @@ export const env = createEnv({
     CHATTERBOX_API_URL: z.url(),
     CHATTERBOX_API_KEY: z.string().min(1),
     LIVEBLOCKS_SECRET_KEY: z.string().min(1),
+    FFMPEG_PATH: z.string().min(1),
   },
   experimental__runtimeEnv: {},
   skipValidation: !!process.env.SKIP_ENV_VALIDATION,
