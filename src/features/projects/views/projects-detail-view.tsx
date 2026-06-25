@@ -15,6 +15,7 @@ import {
   useSuspenseQuery,
 } from "@tanstack/react-query";
 import {
+  Download,
   FileText,
   GripVertical,
   Pencil,
@@ -43,6 +44,7 @@ import {
   useOthers,
   useUpdateMyPresence,
 } from "@/features/collaborative-audio/lib/realtime";
+import { ProjectBlockActionBar } from "@/features/projects/components/project-block-action-bar";
 import { ProjectBlockSettingsPanel } from "@/features/projects/components/project-block-settings-panel";
 import { ProjectAudioPreview } from "@/features/projects/components/project-audio-preview";
 import { ProjectTimeline } from "@/features/projects/components/project-timeline";
@@ -104,6 +106,10 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
 
   const selectedBlock =
     project.blocks.find((block) => block.id === selectedBlockId) ?? null;
+  const latestExport = project.exports[0] ?? null;
+  const generatedBlockCount = project.blocks.filter(
+    (block) => !!block.generation,
+  ).length;
 
   const invalidateProject = () =>
     queryClient.invalidateQueries({
@@ -196,6 +202,19 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
       },
       onSettled: () => {
         setDraggingTimelineBlockId(null);
+      },
+    }),
+  );
+
+  const exportProjectAudio = useMutation(
+    trpc.projects.exportProjectAudio.mutationOptions({
+      onSuccess: async () => {
+        await invalidateProject();
+        toast.success("Project audio exported");
+      },
+      onError: async (error) => {
+        await invalidateProject();
+        toast.error(error.message);
       },
     }),
   );
@@ -468,6 +487,10 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
     });
   };
 
+  const handleExportProjectAudio = () => {
+    exportProjectAudio.mutate({ projectId });
+  };
+
   const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
     updateMyPresence({
       cursor: {
@@ -488,6 +511,7 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
     generateBlockAudio.isPending ||
     reorderProjectBlocks.isPending ||
     updateBlockTimeline.isPending ||
+    exportProjectAudio.isPending ||
     deleteBlock.isPending ||
     releaseBlockLock.isPending;
 
@@ -510,7 +534,34 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
           )}
         </div>
 
-        <ActiveCollaborators />
+        <div className="flex flex-col items-start gap-2 sm:items-end">
+          <ActiveCollaborators />
+          <div className="flex flex-wrap items-center gap-2">
+            {latestExport?.audioUrl && (
+              <Button type="button" variant="outline" size="sm" asChild>
+                <a href={latestExport.audioUrl}>
+                  <Download className="size-4" />
+                  Download export
+                </a>
+              </Button>
+            )}
+            <Button
+              type="button"
+              size="sm"
+              disabled={exportProjectAudio.isPending || generatedBlockCount === 0}
+              onClick={handleExportProjectAudio}
+            >
+              <Download className="size-4" />
+              {exportProjectAudio.isPending ? "Exporting..." : "Export audio"}
+            </Button>
+          </div>
+          {latestExport && (
+            <p className="text-xs text-muted-foreground">
+              Latest export: {latestExport.status.toLowerCase()}
+              {latestExport.errorMessage ? ` - ${latestExport.errorMessage}` : ""}
+            </p>
+          )}
+        </div>
       </div>
 
       <form
@@ -704,6 +755,21 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
                 </div>
               );
             })}
+
+            <ProjectBlockActionBar
+              selectedBlock={selectedBlock}
+              voices={voices}
+              isEditingSelectedBlock={
+                selectedBlock ? editingBlockId === selectedBlock.id : false
+              }
+              isBusy={isBlockActionPending}
+              className="xl:hidden"
+              onStartEdit={(block) =>
+                handleStartEdit(block.id, block.text, block.revision)
+              }
+              onVoiceChange={handleUpdateBlockVoice}
+              onGenerate={handleGenerateBlockAudio}
+            />
           </div>
 
           <ProjectBlockSettingsPanel
@@ -714,6 +780,7 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
               selectedBlock ? editingBlockId === selectedBlock.id : false
             }
             isBusy={isBlockActionPending}
+            className="hidden xl:flex"
             onStartEdit={(block) =>
               handleStartEdit(block.id, block.text, block.revision)
             }
