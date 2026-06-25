@@ -8,6 +8,7 @@ import {
   History,
   Lock,
   Music2,
+  RotateCcw,
   Settings,
   Sparkles,
 } from "lucide-react";
@@ -68,6 +69,7 @@ export function ProjectBlockSettingsPanel({
   onSelectBlock,
   onVoiceChange,
   onGenerate,
+  onRestoreGeneration,
 }: {
   project: Project;
   selectedBlock: ProjectBlock | null;
@@ -79,6 +81,7 @@ export function ProjectBlockSettingsPanel({
   onSelectBlock: (blockId: string) => void;
   onVoiceChange: (blockId: string, voiceId: string) => void;
   onGenerate: (blockId: string) => void;
+  onRestoreGeneration: (blockId: string, historyId: string) => void;
 }) {
   const allVoices = [...voices.custom, ...voices.system];
   const selectedVoice =
@@ -379,20 +382,39 @@ export function ProjectBlockSettingsPanel({
                         <p className="text-xs text-muted-foreground">
                           {new Date(history.createdAt).toLocaleString()}
                         </p>
-                        <Badge
-                          variant={
-                            history.isCurrent &&
-                            selectedBlock.audioState === "STALE"
-                              ? "destructive"
-                              : "outline"
-                          }
-                        >
-                          {history.isCurrent
-                            ? getProjectBlockAudioStateLabel(
-                                selectedBlock.audioState,
-                              )
-                            : "Previous"}
-                        </Badge>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <Badge
+                            variant={
+                              history.isCurrent &&
+                              selectedBlock.audioState === "STALE"
+                                ? "destructive"
+                                : "outline"
+                            }
+                          >
+                            {history.isCurrent
+                              ? getProjectBlockAudioStateLabel(
+                                  selectedBlock.audioState,
+                                )
+                              : "Previous"}
+                          </Badge>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={
+                              !isEditingSelectedBlock ||
+                              isBusy ||
+                              (history.isCurrent &&
+                                selectedBlock.audioState === "CURRENT")
+                            }
+                            onClick={() =>
+                              onRestoreGeneration(selectedBlock.id, history.id)
+                            }
+                          >
+                            <RotateCcw className="size-4" />
+                            Restore
+                          </Button>
+                        </div>
                       </div>
                       <ProjectAudioPreview
                         audioUrl={history.generation.audioUrl}

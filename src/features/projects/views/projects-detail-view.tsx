@@ -179,6 +179,19 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
     }),
   );
 
+  const restoreBlockGeneration = useMutation(
+    trpc.projects.restoreBlockGeneration.mutationOptions({
+      onSuccess: async (updatedBlock) => {
+        setEditingRevision(updatedBlock.revision);
+        await invalidateProject();
+        toast.success("Block audio restored");
+      },
+      onError: (error) => {
+        toast.error(error.message);
+      },
+    }),
+  );
+
   const reorderProjectBlocks = useMutation(
     trpc.projects.reorderBlocks.mutationOptions({
       onSuccess: async () => {
@@ -389,6 +402,10 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
     generateBlockAudio.mutate({ blockId });
   };
 
+  const handleRestoreBlockGeneration = (blockId: string, historyId: string) => {
+    restoreBlockGeneration.mutate({ blockId, historyId });
+  };
+
   const handleBlockDragStart = (
     event: DragEvent<HTMLButtonElement>,
     blockId: string,
@@ -513,6 +530,7 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
     updateBlock.isPending ||
     updateBlockVoice.isPending ||
     generateBlockAudio.isPending ||
+    restoreBlockGeneration.isPending ||
     reorderProjectBlocks.isPending ||
     updateBlockTimeline.isPending ||
     exportProjectAudio.isPending ||
@@ -813,6 +831,7 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
             onSelectBlock={handleSelectBlock}
             onVoiceChange={handleUpdateBlockVoice}
             onGenerate={handleGenerateBlockAudio}
+            onRestoreGeneration={handleRestoreBlockGeneration}
           />
         </div>
       )}

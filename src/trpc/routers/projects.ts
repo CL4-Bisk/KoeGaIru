@@ -17,7 +17,10 @@ import {
   getExportableTimelineBlocks,
   getProjectExportDurationMs,
 } from "@/features/projects/lib/project-export-plan";
-import { getProjectBlockAudioState } from "@/features/projects/lib/project-audio-state";
+import {
+  getProjectBlockAudioState,
+  getRestoreProjectBlockGenerationData,
+} from "@/features/projects/lib/project-audio-state";
 import {
   getProjectExportSourceHash,
   isProjectExportLatest,
@@ -568,6 +571,54 @@ export const projectsRouter = createTRPCRouter({
           message: "Failed to store generated audio",
         });
       }
+    }),
+
+  restoreBlockGeneration: orgProcedure
+    .input(
+      z.object({
+        blockId: z.string().min(1),
+        historyId: z.string().min(1),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      await ensureEditableBlock(input.blockId, ctx.orgId, ctx.userId);
+
+      const history = await prisma.projectBlockGeneration.findFirst({
+        where: {
+          id: input.historyId,
+          blockId: input.blockId,
+          block: {
+            project: {
+              orgId: ctx.orgId,
+            },
+          },
+        },
+        include: {
+          generation: {
+            select: {
+              id: true,
+              text: true,
+              voiceId: true,
+            },
+          },
+        },
+      });
+
+      if (!history) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Audio history item not found.",
+        });
+      }
+
+      return prisma.projectBlock.update({
+        where: { id: input.blockId },
+        data: {
+          ...getRestoreProjectBlockGenerationData(history.generation),
+          revision: { increment: 1 },
+          lockExpiresAt: getLockExpiry(),
+        },
+      });
     }),
 
   reorderBlocks: orgProcedure
