@@ -42,6 +42,7 @@ import { LiveCursors } from "@/features/collaborative-audio/components/live-curs
 import { LobbyProvider } from "@/features/collaborative-audio/contexts/lobby-provider";
 import {
   useOthers,
+  useSelf,
   useUpdateMyPresence,
 } from "@/features/collaborative-audio/lib/realtime";
 import { ProjectBlockActionBar } from "@/features/projects/components/project-block-action-bar";
@@ -49,6 +50,7 @@ import { ProjectBlockSettingsPanel } from "@/features/projects/components/projec
 import { ProjectAudioPreview } from "@/features/projects/components/project-audio-preview";
 import { ProjectTimeline } from "@/features/projects/components/project-timeline";
 import { getProjectBlockAudioStateLabel } from "@/features/projects/lib/project-audio-state";
+import { getProjectCommentMentionSuggestions } from "@/features/projects/lib/project-comments";
 import {
   formatProjectExportDuration,
   getProjectExportVersionLabel,
@@ -88,6 +90,7 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const updateMyPresence = useUpdateMyPresence();
+  const self = useSelf();
   const others = useOthers();
   const [text, setText] = useState("");
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
@@ -111,6 +114,14 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
 
   const selectedBlock =
     project.blocks.find((block) => block.id === selectedBlockId) ?? null;
+  const mentionSuggestions = getProjectCommentMentionSuggestions(
+    others.map((user) => ({
+      id: user.id ?? String(user.connectionId),
+      name: user.info?.name,
+      username: user.info?.username,
+      avatar: user.info?.avatar,
+    })),
+  ).filter((suggestion) => suggestion.id !== self?.id);
   const latestExport = project.exports[0] ?? null;
   const latestExportVersionLabel = latestExport
     ? getProjectExportVersionLabel({
@@ -915,6 +926,7 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
             isExportingProjectAudio={exportProjectAudio.isPending}
             isClearingFailedExports={clearFailedProjectExports.isPending}
             isCommentActionPending={isCommentActionPending}
+            mentionSuggestions={mentionSuggestions}
             onExportProjectAudio={handleExportProjectAudio}
             onClearFailedExports={handleClearFailedProjectExports}
             onCreateComment={handleCreateBlockComment}

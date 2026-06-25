@@ -3,6 +3,7 @@
 import { type FormEvent, useState } from "react";
 import type { inferRouterOutputs } from "@trpc/server";
 import {
+  AtSign,
   AudioLines,
   CheckCircle2,
   Clock,
@@ -34,6 +35,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { VoiceAvatar } from "@/components/voice-avatar/voice-avatar";
 import { getProjectBlockAudioStateLabel } from "@/features/projects/lib/project-audio-state";
+import type { ProjectCommentMentionSuggestion } from "@/features/projects/lib/project-comments";
 import {
   formatProjectExportDuration,
   getFailedProjectExportCount,
@@ -84,6 +86,7 @@ export function ProjectBlockSettingsPanel({
   isExportingProjectAudio,
   isClearingFailedExports,
   isCommentActionPending,
+  mentionSuggestions,
   onExportProjectAudio,
   onClearFailedExports,
   onCreateComment,
@@ -104,6 +107,7 @@ export function ProjectBlockSettingsPanel({
   isExportingProjectAudio: boolean;
   isClearingFailedExports: boolean;
   isCommentActionPending: boolean;
+  mentionSuggestions: ProjectCommentMentionSuggestion[];
   onExportProjectAudio: () => void;
   onClearFailedExports: () => void;
   onCreateComment: (blockId: string, body: string) => void;
@@ -133,6 +137,15 @@ export function ProjectBlockSettingsPanel({
 
     onCreateComment(selectedBlock.id, commentBody);
     setCommentBody("");
+  };
+
+  const handleAddMention = (username: string) => {
+    setCommentBody((currentBody) => {
+      const body = currentBody.trimEnd();
+      const prefix = body ? `${body} ` : "";
+
+      return `${prefix}@${username} `;
+    });
   };
 
   return (
@@ -373,6 +386,23 @@ export function ProjectBlockSettingsPanel({
                   placeholder="Add a comment..."
                   className="min-h-24"
                 />
+                {mentionSuggestions.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {mentionSuggestions.map((suggestion) => (
+                      <Button
+                        key={suggestion.id}
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={isCommentActionPending}
+                        onClick={() => handleAddMention(suggestion.username)}
+                      >
+                        <AtSign className="size-4" />
+                        {suggestion.username}
+                      </Button>
+                    ))}
+                  </div>
+                )}
                 <div className="flex justify-end">
                   <Button
                     type="submit"
