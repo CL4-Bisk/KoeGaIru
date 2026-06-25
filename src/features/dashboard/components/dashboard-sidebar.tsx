@@ -138,7 +138,7 @@ export function DashboardSidebar() {
       icon: Home,
     },
     {
-      title: "View voice projects",
+      title: "Voice projects",
       url: "/projects",
       icon: FolderKanban,
     },
