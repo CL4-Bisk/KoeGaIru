@@ -152,7 +152,7 @@ export function ProjectTimeline({
   };
 
   return (
-    <section className="rounded-lg border bg-background">
+    <section className="min-w-0 overflow-hidden rounded-lg border bg-background">
       <div className="flex flex-col gap-1 border-b p-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-sm font-semibold">Timeline</h2>
