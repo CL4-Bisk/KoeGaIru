@@ -50,6 +50,7 @@ type Project = inferRouterOutputs<AppRouter>["projects"]["getById"];
 type ProjectBlock = Project["blocks"][number];
 type Voices = inferRouterOutputs<AppRouter>["voices"]["getAll"];
 type Voice = Voices["custom"][number];
+export type ProjectBlockSettingsTab = "settings" | "comments" | "history";
 
 const tabTriggerClassName =
   "flex-1 h-full gap-2 bg-transparent rounded-none border-x-0 border-t-0 border-b-px border-b-transparent shadow-none data-[state=active]:border-b-foreground group-data-[variant=default]/tabs-list:data-[state=active]:shadow-none";
@@ -77,6 +78,7 @@ export function ProjectBlockSettingsPanel({
   isEditingSelectedBlock,
   isBusy,
   className,
+  defaultTab = "settings",
   onStartEdit,
   onSelectBlock,
   onVoiceChange,
@@ -98,6 +100,7 @@ export function ProjectBlockSettingsPanel({
   isEditingSelectedBlock: boolean;
   isBusy: boolean;
   className?: string;
+  defaultTab?: ProjectBlockSettingsTab;
   onStartEdit: (block: ProjectBlock) => void;
   onSelectBlock: (blockId: string) => void;
   onVoiceChange: (blockId: string, voiceId: string) => void;
@@ -156,7 +159,7 @@ export function ProjectBlockSettingsPanel({
       )}
     >
       <Tabs
-        defaultValue="settings"
+        defaultValue={defaultTab}
         className="flex min-h-0 flex-1 flex-col gap-y-0"
       >
         <TabsList className="h-12 w-full rounded-none border-b bg-transparent p-0 group-data-[orientation=horizontal]/tabs:h-12">

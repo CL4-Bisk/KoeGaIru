@@ -1,24 +1,27 @@
 "use client";
 
+import type { ReactNode } from "react";
 import type { inferRouterOutputs } from "@trpc/server";
-import { Lock, Music2 } from "lucide-react";
+import { ChevronDown, History, Lock, MessageCircle, Music2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectSeparator,
-  SelectTrigger,
-} from "@/components/ui/select";
+  Drawer,
+  DrawerContent,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@/components/ui/drawer";
 import { Spinner } from "@/components/ui/spinner";
 import { VoiceAvatar } from "@/components/voice-avatar/voice-avatar";
-import { VOICE_CATEGORY_LABELS } from "@/features/voices/data/voice-categories";
+import type { ProjectCommentMentionSuggestion } from "@/features/projects/lib/project-comments";
 import { cn } from "@/lib/utils";
 import type { AppRouter } from "@/trpc/routers/_app";
 
+import {
+  ProjectBlockSettingsPanel,
+  type ProjectBlockSettingsTab,
+} from "./project-block-settings-panel";
 import { getProjectBlockActionState } from "../lib/block-actions";
 
 type Project = inferRouterOutputs<AppRouter>["projects"]["getById"];
@@ -35,23 +38,47 @@ function findVoice(voices: Voice[], voiceId: string | null) {
 }
 
 export function ProjectBlockActionBar({
+  project,
   selectedBlock,
   voices,
   isEditingSelectedBlock,
   isBusy,
   className,
   onStartEdit,
+  onSelectBlock,
   onVoiceChange,
   onGenerate,
+  onRestoreGeneration,
+  canExportProjectAudio,
+  isExportingProjectAudio,
+  isClearingFailedExports,
+  isCommentActionPending,
+  mentionSuggestions,
+  onExportProjectAudio,
+  onClearFailedExports,
+  onCreateComment,
+  onSetCommentResolved,
 }: {
+  project: Project;
   selectedBlock: ProjectBlock | null;
   voices: Voices;
   isEditingSelectedBlock: boolean;
   isBusy: boolean;
   className?: string;
   onStartEdit: (block: ProjectBlock) => void;
+  onSelectBlock: (blockId: string) => void;
   onVoiceChange: (blockId: string, voiceId: string) => void;
   onGenerate: (blockId: string) => void;
+  onRestoreGeneration: (blockId: string, historyId: string) => void;
+  canExportProjectAudio: boolean;
+  isExportingProjectAudio: boolean;
+  isClearingFailedExports: boolean;
+  isCommentActionPending: boolean;
+  mentionSuggestions: ProjectCommentMentionSuggestion[];
+  onExportProjectAudio: () => void;
+  onClearFailedExports: () => void;
+  onCreateComment: (blockId: string, body: string) => void;
+  onSetCommentResolved: (commentId: string, isResolved: boolean) => void;
 }) {
   const allVoices = [...voices.custom, ...voices.system];
   const selectedVoice =
@@ -63,76 +90,116 @@ export function ProjectBlockActionBar({
     isEditingSelectedBlock,
     isGenerating: Boolean(isBusy && selectedBlock?.status === "GENERATING"),
   });
+  const voiceButtonLabel = selectedVoice?.name ?? actionState.voiceLabel;
+
+  const renderPanelDrawer = ({
+    title,
+    tab,
+    trigger,
+  }: {
+    title: string;
+    tab: ProjectBlockSettingsTab;
+    trigger: ReactNode;
+  }) => (
+    <Drawer>
+      <DrawerTrigger asChild>{trigger}</DrawerTrigger>
+      <DrawerContent>
+        <DrawerHeader>
+          <DrawerTitle>{title}</DrawerTitle>
+        </DrawerHeader>
+        <div className="min-h-0 overflow-y-auto">
+          <ProjectBlockSettingsPanel
+            project={project}
+            selectedBlock={selectedBlock}
+            voices={voices}
+            isEditingSelectedBlock={isEditingSelectedBlock}
+            isBusy={isBusy}
+            defaultTab={tab}
+            className="min-h-0 max-h-[70vh] rounded-none border-0 lg:static lg:top-auto lg:max-h-none"
+            onStartEdit={onStartEdit}
+            onSelectBlock={onSelectBlock}
+            onVoiceChange={onVoiceChange}
+            onGenerate={onGenerate}
+            onRestoreGeneration={onRestoreGeneration}
+            canExportProjectAudio={canExportProjectAudio}
+            isExportingProjectAudio={isExportingProjectAudio}
+            isClearingFailedExports={isClearingFailedExports}
+            isCommentActionPending={isCommentActionPending}
+            mentionSuggestions={mentionSuggestions}
+            onExportProjectAudio={onExportProjectAudio}
+            onClearFailedExports={onClearFailedExports}
+            onCreateComment={onCreateComment}
+            onSetCommentResolved={onSetCommentResolved}
+          />
+        </div>
+      </DrawerContent>
+    </Drawer>
+  );
 
   return (
     <div
       className={cn(
-        "sticky bottom-0 z-10 -mx-6 -mb-6 shrink-0 border-t bg-background/95 p-4 backdrop-blur lg:p-6",
+        "shrink-0 p-4 lg:p-6",
         className,
       )}
     >
       <div className="flex flex-col gap-3">
         <div className="flex items-center gap-2">
-          <Select
-            value={selectedBlock?.voiceId ?? ""}
-            onValueChange={(voiceId) => {
-              if (selectedBlock) {
-                onVoiceChange(selectedBlock.id, voiceId);
-              }
-            }}
-            disabled={!actionState.canChangeVoice}
-          >
-            <SelectTrigger
-              size="sm"
-              className="h-8 min-w-0 flex-1 justify-start gap-2 px-2"
-            >
-              {selectedVoice ? (
-                <VoiceAvatar
-                  seed={selectedVoice.id}
-                  name={selectedVoice.name}
-                  className="size-6"
-                />
-              ) : (
-                <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted">
-                  <Music2 className="size-3.5 text-muted-foreground" />
+          {renderPanelDrawer({
+            title: "Settings",
+            tab: "settings",
+            trigger: (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="min-w-0 flex-1 justify-start gap-2 px-2"
+              >
+                {selectedVoice ? (
+                  <VoiceAvatar
+                    seed={selectedVoice.id}
+                    name={selectedVoice.name}
+                    className="size-6"
+                  />
+                ) : (
+                  <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted">
+                    <Music2 className="size-3.5 text-muted-foreground" />
+                  </span>
+                )}
+                <span className="min-w-0 flex-1 truncate text-left text-sm font-medium">
+                  {voiceButtonLabel}
                 </span>
-              )}
-              <span className="min-w-0 flex-1 truncate text-left text-sm font-medium">
-                {selectedVoice?.name ?? actionState.voiceLabel}
-              </span>
-            </SelectTrigger>
-            <SelectContent>
-              {voices.custom.length > 0 && (
-                <SelectGroup>
-                  <SelectLabel>Team Voices</SelectLabel>
-                  {voices.custom.map((voice) => (
-                    <SelectItem key={voice.id} value={voice.id}>
-                      <VoiceAvatar seed={voice.id} name={voice.name} />
-                      <span className="truncate text-sm font-medium">
-                        {voice.name} - {VOICE_CATEGORY_LABELS[voice.category]}
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              )}
-              {voices.custom.length > 0 && voices.system.length > 0 && (
-                <SelectSeparator />
-              )}
-              {voices.system.length > 0 && (
-                <SelectGroup>
-                  <SelectLabel>Built-in Voices</SelectLabel>
-                  {voices.system.map((voice) => (
-                    <SelectItem key={voice.id} value={voice.id}>
-                      <VoiceAvatar seed={voice.id} name={voice.name} />
-                      <span className="truncate text-sm font-medium">
-                        {voice.name} - {VOICE_CATEGORY_LABELS[voice.category]}
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              )}
-            </SelectContent>
-          </Select>
+                <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
+              </Button>
+            ),
+          })}
+
+          {renderPanelDrawer({
+            title: "Comments",
+            tab: "comments",
+            trigger: (
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                disabled={!selectedBlock}
+              >
+                <MessageCircle className="size-4" />
+                <span className="sr-only">Open comments</span>
+              </Button>
+            ),
+          })}
+
+          {renderPanelDrawer({
+            title: "History",
+            tab: "history",
+            trigger: (
+              <Button type="button" variant="outline" size="icon-sm">
+                <History className="size-4" />
+                <span className="sr-only">Open history</span>
+              </Button>
+            ),
+          })}
 
           <Button
             type="button"

@@ -12,7 +12,7 @@ import {
 import {
   useMutation,
   useQueryClient,
-  useSuspenseQuery,
+  useSuspenseQueries,
 } from "@tanstack/react-query";
 import {
   Download,
@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -48,6 +49,7 @@ import {
 import { ProjectBlockActionBar } from "@/features/projects/components/project-block-action-bar";
 import { ProjectBlockSettingsPanel } from "@/features/projects/components/project-block-settings-panel";
 import { ProjectAudioPreview } from "@/features/projects/components/project-audio-preview";
+import { ProjectAudioPreviewMobile } from "@/features/projects/components/project-audio-preview-mobile";
 import { ProjectNotificationsMenu } from "@/features/projects/components/project-notifications-menu";
 import { ProjectTimeline } from "@/features/projects/components/project-timeline";
 import { getProjectBlockAudioStateLabel } from "@/features/projects/lib/project-audio-state";
@@ -105,17 +107,31 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
   >(null);
   const editingBlockIdRef = useRef<string | null>(null);
 
-  const { data: project } = useSuspenseQuery({
-    ...trpc.projects.getById.queryOptions({ id: projectId }),
-    refetchInterval: 5000,
+  const [projectQuery, voicesQuery] = useSuspenseQueries({
+    queries: [
+      {
+        ...trpc.projects.getById.queryOptions({ id: projectId }),
+        refetchInterval: 5000,
+      },
+      trpc.voices.getAll.queryOptions(),
+    ],
   });
 
-  const { data: voices } = useSuspenseQuery(
-    trpc.voices.getAll.queryOptions(),
-  );
+  const project = projectQuery.data;
+  const { data: voices } = voicesQuery;
 
   const selectedBlock =
     project.blocks.find((block) => block.id === selectedBlockId) ?? null;
+  const selectedBlockAudio = selectedBlock?.generation
+    ? {
+        audioUrl: selectedBlock.generation.audioUrl,
+        text: selectedBlock.generation.text,
+        voice: {
+          id: selectedBlock.generation.voiceId,
+          name: selectedBlock.generation.voiceName,
+        },
+      }
+    : null;
   const mentionSuggestions = getProjectCommentMentionSuggestions(
     others.map((user) => ({
       id: user.id ?? String(user.connectionId),
@@ -649,129 +665,130 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
   const isCommentActionPending =
     createBlockComment.isPending || setBlockCommentResolved.isPending;
 
+  const projectHeaderActions = (
+    <div className="flex min-w-0 max-w-full flex-col items-end gap-1.5">
+      <div className="flex max-w-full flex-wrap items-center justify-end gap-2">
+        <ProjectNotificationsMenu
+          notifications={project.notifications}
+          isMarkingRead={markProjectNotificationsRead.isPending}
+          onOpen={handleOpenProjectNotifications}
+          onSelectBlock={handleSelectBlock}
+        />
+        <ActiveCollaborators />
+        {latestExport?.audioUrl && (
+          <Button type="button" variant="outline" size="sm" asChild>
+            <a
+              href={latestExport.audioUrl}
+              aria-label="Download latest project export"
+            >
+              <Download className="size-4" />
+              <span className="hidden lg:inline">Download latest</span>
+            </a>
+          </Button>
+        )}
+        <Button
+          type="button"
+          size="sm"
+          disabled={exportProjectAudio.isPending || !canExportProjectAudio}
+          aria-label={
+            exportProjectAudio.isPending
+              ? "Exporting project audio"
+              : "Export project audio"
+          }
+          onClick={handleExportProjectAudio}
+        >
+          <Download className="size-4" />
+          <span className="hidden lg:inline">
+            {exportProjectAudio.isPending
+              ? "Exporting..."
+              : latestExport?.status === "READY" && !latestExport.isLatest
+                ? "Export again"
+                : "Export audio"}
+          </span>
+        </Button>
+      </div>
+      {latestExport && (
+        <p className="max-w-full truncate text-right text-xs text-muted-foreground">
+          Latest export: {latestExportVersionLabel}
+          {latestExport.durationMs !== null
+            ? ` - ${formatProjectExportDuration(latestExport.durationMs)}`
+            : ""}
+          {latestExport.errorMessage ? ` - ${latestExport.errorMessage}` : ""}
+        </p>
+      )}
+      {staleGeneratedBlockCount > 0 && (
+        <p className="max-w-full truncate text-right text-xs text-destructive">
+          {staleGeneratedBlockCount} block
+          {staleGeneratedBlockCount === 1 ? "" : "s"} need regeneration before
+          export.
+        </p>
+      )}
+    </div>
+  );
+
   return (
     <div
-      className="flex flex-1 flex-col gap-6 p-6"
+      className="flex min-h-0 flex-1 flex-col"
       onPointerMove={handlePointerMove}
       onPointerLeave={handlePointerLeave}
     >
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {project.name}
-          </h1>
+      <PageHeader
+        title={project.name}
+        description={project.description || undefined}
+        actions={projectHeaderActions}
+      />
 
-          {project.description && (
-            <p className="text-sm text-muted-foreground">
-              {project.description}
-            </p>
-          )}
-        </div>
-
-        <div className="flex flex-col items-start gap-2 sm:items-end">
-          <div className="flex items-center gap-2">
-            <ProjectNotificationsMenu
-              notifications={project.notifications}
-              isMarkingRead={markProjectNotificationsRead.isPending}
-              onOpen={handleOpenProjectNotifications}
-              onSelectBlock={handleSelectBlock}
+      <div className="flex flex-1 flex-col gap-6 p-6">
+        <form
+          onSubmit={handleCreateBlock}
+          className="rounded-lg border bg-background p-4"
+        >
+          <div className="flex flex-col gap-3">
+            <Textarea
+              value={text}
+              onChange={(event) => setText(event.target.value)}
+              placeholder="Write a text block..."
+              className="min-h-24"
             />
-            <ActiveCollaborators />
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {latestExport?.audioUrl && (
-              <Button type="button" variant="outline" size="sm" asChild>
-                <a href={latestExport.audioUrl}>
-                  <Download className="size-4" />
-                  Download latest
-                </a>
+            <div className="flex justify-end">
+              <Button
+                type="submit"
+                disabled={createBlock.isPending || !text.trim()}
+              >
+                <Plus className="size-4" />
+                {createBlock.isPending ? "Adding..." : "Add text block"}
               </Button>
-            )}
-            <Button
-              type="button"
-              size="sm"
-              disabled={
-                exportProjectAudio.isPending || !canExportProjectAudio
-              }
-              onClick={handleExportProjectAudio}
-            >
-              <Download className="size-4" />
-              {exportProjectAudio.isPending
-                ? "Exporting..."
-                : latestExport?.status === "READY" && !latestExport.isLatest
-                  ? "Export again"
-                  : "Export audio"}
-            </Button>
+            </div>
           </div>
-          {latestExport && (
-            <p className="text-xs text-muted-foreground">
-              Latest export: {latestExportVersionLabel}
-              {latestExport.durationMs !== null
-                ? ` - ${formatProjectExportDuration(latestExport.durationMs)}`
-                : ""}
-              {latestExport.errorMessage ? ` - ${latestExport.errorMessage}` : ""}
-            </p>
-          )}
-          {staleGeneratedBlockCount > 0 && (
-            <p className="text-xs text-destructive">
-              {staleGeneratedBlockCount} block
-              {staleGeneratedBlockCount === 1 ? "" : "s"} need regeneration
-              before export.
-            </p>
-          )}
-        </div>
-      </div>
+        </form>
 
-      <form
-        onSubmit={handleCreateBlock}
-        className="rounded-lg border bg-background p-4"
-      >
-        <div className="flex flex-col gap-3">
-          <Textarea
-            value={text}
-            onChange={(event) => setText(event.target.value)}
-            placeholder="Write a text block..."
-            className="min-h-24"
-          />
-          <div className="flex justify-end">
-            <Button
-              type="submit"
-              disabled={createBlock.isPending || !text.trim()}
-            >
-              <Plus className="size-4" />
-              {createBlock.isPending ? "Adding..." : "Add text block"}
-            </Button>
-          </div>
-        </div>
-      </form>
-
-      {project.blocks.length === 0 ? (
-        <Empty className="border bg-background">
-          <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <FileText className="size-5" />
-            </EmptyMedia>
-            <EmptyTitle>No blocks yet</EmptyTitle>
-            <EmptyDescription>
-              Add your first text block to start building this project.
-            </EmptyDescription>
-          </EmptyHeader>
-          <EmptyContent />
-        </Empty>
-      ) : (
-        <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
-          <div className="grid gap-4">
-            <ProjectTimeline
-              blocks={project.blocks}
-              selectedBlockId={selectedBlockId}
-              draggingTimelineBlockId={draggingTimelineBlockId}
-              isBusy={isBlockActionPending}
-              onSelectBlock={handleSelectBlock}
-              onDragStart={handleTimelineDragStart}
-              onDragEnd={() => setDraggingTimelineBlockId(null)}
-              onMoveBlock={handleTimelineMoveBlock}
-              onResizeBlock={handleTimelineResizeBlock}
-            />
+        {project.blocks.length === 0 ? (
+          <Empty className="border bg-background">
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <FileText className="size-5" />
+              </EmptyMedia>
+              <EmptyTitle>No blocks yet</EmptyTitle>
+              <EmptyDescription>
+                Add your first text block to start building this project.
+              </EmptyDescription>
+            </EmptyHeader>
+            <EmptyContent />
+          </Empty>
+        ) : (
+          <div className="grid min-w-0 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
+            <div className="grid min-w-0 gap-4">
+              <ProjectTimeline
+                blocks={project.blocks}
+                selectedBlockId={selectedBlockId}
+                draggingTimelineBlockId={draggingTimelineBlockId}
+                isBusy={isBlockActionPending}
+                onSelectBlock={handleSelectBlock}
+                onDragStart={handleTimelineDragStart}
+                onDragEnd={() => setDraggingTimelineBlockId(null)}
+                onMoveBlock={handleTimelineMoveBlock}
+                onResizeBlock={handleTimelineResizeBlock}
+              />
 
             {project.blocks.map((block, index) => {
               const isEditing = editingBlockId === block.id;
@@ -788,7 +805,7 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
                   key={block.id}
                   role="button"
                   tabIndex={0}
-                  className={`rounded-lg border bg-background p-5 shadow-sm transition-colors ${
+                  className={`min-w-0 rounded-lg border bg-background p-4 shadow-sm transition-colors ${
                     isSelected ? "border-primary/70 bg-primary/5" : ""
                   } ${isDragging ? "opacity-50" : ""} ${
                     isDragTarget ? "border-primary bg-primary/10" : ""
@@ -922,20 +939,43 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
               );
             })}
 
-            <ProjectBlockActionBar
-              selectedBlock={selectedBlock}
-              voices={voices}
-              isEditingSelectedBlock={
-                selectedBlock ? editingBlockId === selectedBlock.id : false
-              }
-              isBusy={isBlockActionPending}
-              className="xl:hidden"
-              onStartEdit={(block) =>
-                handleStartEdit(block.id, block.text, block.revision)
-              }
-              onVoiceChange={handleUpdateBlockVoice}
-              onGenerate={handleGenerateBlockAudio}
-            />
+            <div className="relative sticky bottom-0 z-10 -mx-6 -mb-6 shrink-0 border-t bg-background/95 backdrop-blur md:mx-0 xl:hidden">
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-x-0 -top-8 h-8 bg-linear-to-t from-background to-transparent"
+              />
+              <ProjectAudioPreviewMobile
+                audioUrl={selectedBlockAudio?.audioUrl ?? null}
+                text={selectedBlockAudio?.text ?? selectedBlock?.text ?? ""}
+                voice={selectedBlockAudio?.voice ?? null}
+              />
+
+              <ProjectBlockActionBar
+                project={project}
+                selectedBlock={selectedBlock}
+                voices={voices}
+                isEditingSelectedBlock={
+                  selectedBlock ? editingBlockId === selectedBlock.id : false
+                }
+                isBusy={isBlockActionPending}
+                onStartEdit={(block) =>
+                  handleStartEdit(block.id, block.text, block.revision)
+                }
+                onSelectBlock={handleSelectBlock}
+                onVoiceChange={handleUpdateBlockVoice}
+                onGenerate={handleGenerateBlockAudio}
+                onRestoreGeneration={handleRestoreBlockGeneration}
+                canExportProjectAudio={canExportProjectAudio}
+                isExportingProjectAudio={exportProjectAudio.isPending}
+                isClearingFailedExports={clearFailedProjectExports.isPending}
+                isCommentActionPending={isCommentActionPending}
+                mentionSuggestions={mentionSuggestions}
+                onExportProjectAudio={handleExportProjectAudio}
+                onClearFailedExports={handleClearFailedProjectExports}
+                onCreateComment={handleCreateBlockComment}
+                onSetCommentResolved={handleSetBlockCommentResolved}
+              />
+            </div>
           </div>
 
           <ProjectBlockSettingsPanel
@@ -965,37 +1005,9 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
             onSetCommentResolved={handleSetBlockCommentResolved}
           />
         </div>
-      )}
+        )}
+      </div>
       <LiveCursors />
     </div>
-    // <div className="flex flex-1 flex-col gap-6 p-6">
-    //   <div>
-    //     <p className="text-sm text-muted-foreground">Project / {projectId}</p>
-    //     <h1 className="text-2xl font-semibold tracking-tight">
-    //       Demo voice project
-    //     </h1>
-    //   </div>
-
-    //   <div className="grid gap-4">
-    //     {demoBlocks.map((block, index) => (
-    //       <div key={index} className="rounded-lg border bg-background p-5">
-    //         <div className="mb-3 flex items-center justify-between">
-    //           <p className="text-sm font-medium">{block.speaker}</p>
-    //           <span className="rounded-full border px-2 py-1 text-xs text-muted-foreground">
-    //             {block.status}
-    //           </span>
-    //         </div>
-
-    //         <p className="text-sm leading-6 text-muted-foreground">
-    //           {block.text}
-    //         </p>
-
-    //         <div className="mt-4 h-10 rounded-md border border-dashed bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
-    //           Audio clip preview placeholder
-    //         </div>
-    //       </div>
-    //     ))}
-    //   </div>
-    // </div>
   );
 }
