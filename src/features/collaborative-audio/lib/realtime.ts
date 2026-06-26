@@ -28,6 +28,7 @@ export type CollaborationUserMeta = {
   info?: {
     [key: string]: Json | undefined;
     name?: string;
+    username?: string;
     avatar?: string;
   };
 };

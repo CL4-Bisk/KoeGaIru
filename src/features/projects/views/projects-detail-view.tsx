@@ -42,13 +42,20 @@ import { LiveCursors } from "@/features/collaborative-audio/components/live-curs
 import { LobbyProvider } from "@/features/collaborative-audio/contexts/lobby-provider";
 import {
   useOthers,
+  useSelf,
   useUpdateMyPresence,
 } from "@/features/collaborative-audio/lib/realtime";
 import { ProjectBlockActionBar } from "@/features/projects/components/project-block-action-bar";
 import { ProjectBlockSettingsPanel } from "@/features/projects/components/project-block-settings-panel";
 import { ProjectAudioPreview } from "@/features/projects/components/project-audio-preview";
+import { ProjectNotificationsMenu } from "@/features/projects/components/project-notifications-menu";
 import { ProjectTimeline } from "@/features/projects/components/project-timeline";
 import { getProjectBlockAudioStateLabel } from "@/features/projects/lib/project-audio-state";
+import { getProjectCommentMentionSuggestions } from "@/features/projects/lib/project-comments";
+import {
+  formatProjectExportDuration,
+  getProjectExportVersionLabel,
+} from "@/features/projects/lib/project-export-history";
 import { reorderBlockIds } from "@/features/projects/lib/reorder-blocks";
 import { useTRPC } from "@/trpc/client";
 
@@ -84,6 +91,7 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const updateMyPresence = useUpdateMyPresence();
+  const self = useSelf();
   const others = useOthers();
   const [text, setText] = useState("");
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
@@ -97,9 +105,10 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
   >(null);
   const editingBlockIdRef = useRef<string | null>(null);
 
-  const { data: project } = useSuspenseQuery(
-    trpc.projects.getById.queryOptions({ id: projectId }),
-  );
+  const { data: project } = useSuspenseQuery({
+    ...trpc.projects.getById.queryOptions({ id: projectId }),
+    refetchInterval: 5000,
+  });
 
   const { data: voices } = useSuspenseQuery(
     trpc.voices.getAll.queryOptions(),
@@ -107,13 +116,29 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
 
   const selectedBlock =
     project.blocks.find((block) => block.id === selectedBlockId) ?? null;
+  const mentionSuggestions = getProjectCommentMentionSuggestions(
+    others.map((user) => ({
+      id: user.id ?? String(user.connectionId),
+      name: user.info?.name,
+      username: user.info?.username,
+      avatar: user.info?.avatar,
+    })),
+  ).filter((suggestion) => suggestion.id !== self?.id);
   const latestExport = project.exports[0] ?? null;
+  const latestExportVersionLabel = latestExport
+    ? getProjectExportVersionLabel({
+        status: latestExport.status,
+        isLatest: latestExport.isLatest,
+      })
+    : null;
   const currentGeneratedBlockCount = project.blocks.filter(
     (block) => block.audioState === "CURRENT",
   ).length;
   const staleGeneratedBlockCount = project.blocks.filter(
     (block) => block.audioState === "STALE",
   ).length;
+  const canExportProjectAudio =
+    currentGeneratedBlockCount > 0 && staleGeneratedBlockCount === 0;
 
   const invalidateProject = () =>
     queryClient.invalidateQueries({
@@ -179,6 +204,54 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
     }),
   );
 
+  const restoreBlockGeneration = useMutation(
+    trpc.projects.restoreBlockGeneration.mutationOptions({
+      onSuccess: async (updatedBlock) => {
+        setEditingRevision(updatedBlock.revision);
+        await invalidateProject();
+        toast.success("Block audio restored");
+      },
+      onError: (error) => {
+        toast.error(error.message);
+      },
+    }),
+  );
+
+  const createBlockComment = useMutation(
+    trpc.projects.createBlockComment.mutationOptions({
+      onSuccess: async () => {
+        await invalidateProject();
+        toast.success("Comment added");
+      },
+      onError: (error) => {
+        toast.error(error.message);
+      },
+    }),
+  );
+
+  const setBlockCommentResolved = useMutation(
+    trpc.projects.setBlockCommentResolved.mutationOptions({
+      onSuccess: async (_comment, variables) => {
+        await invalidateProject();
+        toast.success(variables.isResolved ? "Comment resolved" : "Comment reopened");
+      },
+      onError: (error) => {
+        toast.error(error.message);
+      },
+    }),
+  );
+
+  const markProjectNotificationsRead = useMutation(
+    trpc.projects.markProjectNotificationsRead.mutationOptions({
+      onSuccess: async () => {
+        await invalidateProject();
+      },
+      onError: (error) => {
+        toast.error(error.message);
+      },
+    }),
+  );
+
   const reorderProjectBlocks = useMutation(
     trpc.projects.reorderBlocks.mutationOptions({
       onSuccess: async () => {
@@ -218,6 +291,22 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
       },
       onError: async (error) => {
         await invalidateProject();
+        toast.error(error.message);
+      },
+    }),
+  );
+
+  const clearFailedProjectExports = useMutation(
+    trpc.projects.clearFailedProjectExports.mutationOptions({
+      onSuccess: async ({ deletedCount }) => {
+        await invalidateProject();
+        toast.success(
+          deletedCount === 1
+            ? "Failed export cleared"
+            : `${deletedCount} failed exports cleared`,
+        );
+      },
+      onError: (error) => {
         toast.error(error.message);
       },
     }),
@@ -389,6 +478,32 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
     generateBlockAudio.mutate({ blockId });
   };
 
+  const handleRestoreBlockGeneration = (blockId: string, historyId: string) => {
+    restoreBlockGeneration.mutate({ blockId, historyId });
+  };
+
+  const handleCreateBlockComment = (blockId: string, body: string) => {
+    createBlockComment.mutate({ blockId, body });
+  };
+
+  const handleSetBlockCommentResolved = (
+    commentId: string,
+    isResolved: boolean,
+  ) => {
+    setBlockCommentResolved.mutate({ commentId, isResolved });
+  };
+
+  const handleOpenProjectNotifications = () => {
+    if (
+      markProjectNotificationsRead.isPending ||
+      project.notifications.every((notification) => notification.isRead)
+    ) {
+      return;
+    }
+
+    markProjectNotificationsRead.mutate({ projectId });
+  };
+
   const handleBlockDragStart = (
     event: DragEvent<HTMLButtonElement>,
     blockId: string,
@@ -495,6 +610,18 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
     exportProjectAudio.mutate({ projectId });
   };
 
+  const handleClearFailedProjectExports = () => {
+    if (
+      !window.confirm(
+        "Clear failed export records? Ready exports and generated audio will stay saved.",
+      )
+    ) {
+      return;
+    }
+
+    clearFailedProjectExports.mutate({ projectId });
+  };
+
   const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
     updateMyPresence({
       cursor: {
@@ -513,11 +640,14 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
     updateBlock.isPending ||
     updateBlockVoice.isPending ||
     generateBlockAudio.isPending ||
+    restoreBlockGeneration.isPending ||
     reorderProjectBlocks.isPending ||
     updateBlockTimeline.isPending ||
     exportProjectAudio.isPending ||
     deleteBlock.isPending ||
     releaseBlockLock.isPending;
+  const isCommentActionPending =
+    createBlockComment.isPending || setBlockCommentResolved.isPending;
 
   return (
     <div
@@ -539,13 +669,21 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
         </div>
 
         <div className="flex flex-col items-start gap-2 sm:items-end">
-          <ActiveCollaborators />
+          <div className="flex items-center gap-2">
+            <ProjectNotificationsMenu
+              notifications={project.notifications}
+              isMarkingRead={markProjectNotificationsRead.isPending}
+              onOpen={handleOpenProjectNotifications}
+              onSelectBlock={handleSelectBlock}
+            />
+            <ActiveCollaborators />
+          </div>
           <div className="flex flex-wrap items-center gap-2">
             {latestExport?.audioUrl && (
               <Button type="button" variant="outline" size="sm" asChild>
                 <a href={latestExport.audioUrl}>
                   <Download className="size-4" />
-                  Download export
+                  Download latest
                 </a>
               </Button>
             )}
@@ -553,21 +691,23 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
               type="button"
               size="sm"
               disabled={
-                exportProjectAudio.isPending ||
-                currentGeneratedBlockCount === 0 ||
-                staleGeneratedBlockCount > 0
+                exportProjectAudio.isPending || !canExportProjectAudio
               }
               onClick={handleExportProjectAudio}
             >
               <Download className="size-4" />
-              {exportProjectAudio.isPending ? "Exporting..." : "Export audio"}
+              {exportProjectAudio.isPending
+                ? "Exporting..."
+                : latestExport?.status === "READY" && !latestExport.isLatest
+                  ? "Export again"
+                  : "Export audio"}
             </Button>
           </div>
           {latestExport && (
             <p className="text-xs text-muted-foreground">
-              Latest export: {latestExport.status.toLowerCase()}
-              {latestExport.status === "READY"
-                ? ` - ${latestExport.isLatest ? "latest" : "outdated"}`
+              Latest export: {latestExportVersionLabel}
+              {latestExport.durationMs !== null
+                ? ` - ${formatProjectExportDuration(latestExport.durationMs)}`
                 : ""}
               {latestExport.errorMessage ? ` - ${latestExport.errorMessage}` : ""}
             </p>
@@ -813,6 +953,16 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
             onSelectBlock={handleSelectBlock}
             onVoiceChange={handleUpdateBlockVoice}
             onGenerate={handleGenerateBlockAudio}
+            onRestoreGeneration={handleRestoreBlockGeneration}
+            canExportProjectAudio={canExportProjectAudio}
+            isExportingProjectAudio={exportProjectAudio.isPending}
+            isClearingFailedExports={clearFailedProjectExports.isPending}
+            isCommentActionPending={isCommentActionPending}
+            mentionSuggestions={mentionSuggestions}
+            onExportProjectAudio={handleExportProjectAudio}
+            onClearFailedExports={handleClearFailedProjectExports}
+            onCreateComment={handleCreateBlockComment}
+            onSetCommentResolved={handleSetBlockCommentResolved}
           />
         </div>
       )}

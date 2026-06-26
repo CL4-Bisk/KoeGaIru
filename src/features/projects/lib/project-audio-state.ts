@@ -38,3 +38,16 @@ export function getProjectBlockAudioStateLabel(
       return "No audio";
   }
 }
+
+export function getRestoreProjectBlockGenerationData(generation: {
+  id: string;
+  text: string;
+  voiceId: string | null;
+}) {
+  return {
+    text: generation.text,
+    voiceId: generation.voiceId,
+    generationId: generation.id,
+    status: "GENERATED" as const,
+  };
+}

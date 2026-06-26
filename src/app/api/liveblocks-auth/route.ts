@@ -22,6 +22,7 @@ export async function POST() {
         user?.username ??
         user?.primaryEmailAddress?.emailAddress ??
         "Collaborator",
+      username: user?.username ?? undefined,
       avatar: user?.imageUrl ?? "",
     },
   });

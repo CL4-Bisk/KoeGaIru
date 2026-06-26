@@ -1,4 +1,7 @@
 import { spawn } from "node:child_process";
+import ffmpegStaticPath from "ffmpeg-static";
+
+import { env } from "../../../lib/env";
 
 export class ProjectExportFfmpegError extends Error {
   constructor(
@@ -10,8 +13,25 @@ export class ProjectExportFfmpegError extends Error {
   }
 }
 
+export function getProjectExportFfmpegPathCandidates({
+  envPath = env.FFMPEG_PATH,
+  staticPath = ffmpegStaticPath,
+  commandPath = "ffmpeg",
+}: {
+  envPath?: string;
+  staticPath?: string | null;
+  commandPath?: string;
+} = {}) {
+  const candidates = [envPath, staticPath, commandPath].filter(
+    (candidate): candidate is string =>
+      typeof candidate === "string" && candidate.trim().length > 0,
+  );
+
+  return Array.from(new Set(candidates));
+}
+
 export function getFfmpegPath() {
-  return process.env.FFMPEG_PATH || "ffmpeg";
+  return getProjectExportFfmpegPathCandidates()[0];
 }
 
 export function buildProjectExportFfmpegArgs({
@@ -43,7 +63,7 @@ export function buildProjectExportFfmpegArgs({
 }
 
 export async function runProjectExportFfmpeg({
-  ffmpegPath = getFfmpegPath(),
+  ffmpegPath,
   inputPaths,
   filter,
   outputLabel,
@@ -61,7 +81,42 @@ export async function runProjectExportFfmpeg({
     outputLabel,
     outputPath,
   });
+  const candidates = ffmpegPath
+    ? [ffmpegPath]
+    : getProjectExportFfmpegPathCandidates();
+  const missingCandidates: string[] = [];
 
+  for (const candidate of candidates) {
+    try {
+      await runFfmpegCommand(candidate, args);
+      return;
+    } catch (error) {
+      if (
+        error &&
+        typeof error === "object" &&
+        "code" in error &&
+        error.code === "ENOENT"
+      ) {
+        missingCandidates.push(candidate);
+        continue;
+      }
+
+      if (error instanceof ProjectExportFfmpegError) {
+        throw error;
+      }
+
+      throw new ProjectExportFfmpegError(
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
+  throw new ProjectExportFfmpegError(
+    `FFmpeg is not configured. Tried: ${missingCandidates.join(", ")}.`,
+  );
+}
+
+async function runFfmpegCommand(ffmpegPath: string, args: string[]) {
   await new Promise<void>((resolve, reject) => {
     const child = spawn(ffmpegPath, args, {
       windowsHide: true,
@@ -73,16 +128,7 @@ export async function runProjectExportFfmpeg({
     });
 
     child.on("error", (error: NodeJS.ErrnoException) => {
-      if (error.code === "ENOENT") {
-        reject(
-          new ProjectExportFfmpegError(
-            "FFmpeg is not configured. Install ffmpeg or set FFMPEG_PATH.",
-          ),
-        );
-        return;
-      }
-
-      reject(new ProjectExportFfmpegError(error.message));
+      reject(error);
     });
 
     child.on("close", (code) => {

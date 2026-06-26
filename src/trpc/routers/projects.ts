@@ -1,4 +1,5 @@
 import * as Sentry from "@sentry/nextjs";
+import { clerkClient, currentUser } from "@clerk/nextjs/server";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -17,11 +18,21 @@ import {
   getExportableTimelineBlocks,
   getProjectExportDurationMs,
 } from "@/features/projects/lib/project-export-plan";
-import { getProjectBlockAudioState } from "@/features/projects/lib/project-audio-state";
+import {
+  getProjectBlockAudioState,
+  getRestoreProjectBlockGenerationData,
+} from "@/features/projects/lib/project-audio-state";
 import {
   getProjectExportSourceHash,
   isProjectExportLatest,
 } from "@/features/projects/lib/project-export-source";
+import { getProjectCommentCreateData } from "@/features/projects/lib/project-comments";
+import { getFailedProjectExportDeleteWhere } from "@/features/projects/lib/project-export-history";
+import {
+  getMentionedProjectMembers,
+  getProjectMemberMentionTargets,
+  getProjectMentionNotificationCreateManyData,
+} from "@/features/projects/lib/project-notifications";
 import { createTRPCRouter, orgProcedure } from "../init";
 
 const BLOCK_LOCK_TTL_MS = 2 * 60 * 1000;
@@ -56,6 +67,88 @@ async function downloadAudioToFile(r2ObjectKey: string, filePath: string) {
 
   const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
   await writeFile(filePath, audioBuffer);
+}
+
+async function getCommentAuthorName(userId: string) {
+  const user = await currentUser().catch(() => null);
+
+  return (
+    user?.fullName ??
+    user?.username ??
+    user?.primaryEmailAddress?.emailAddress ??
+    userId
+  );
+}
+
+async function getMentionedOrganizationMembers({
+  orgId,
+  authorId,
+  mentionedUsernames,
+}: {
+  orgId: string;
+  authorId: string;
+  mentionedUsernames: string[];
+}) {
+  const usernames = Array.from(new Set(mentionedUsernames));
+
+  if (usernames.length === 0) {
+    return [];
+  }
+
+  try {
+    const client = await clerkClient();
+    const memberships =
+      await client.organizations.getOrganizationMembershipList({
+        organizationId: orgId,
+        limit: 100,
+      });
+    const mentionedUsers = await client.users.getUserList({
+      username: usernames,
+      limit: 100,
+    });
+
+    const members = getProjectMemberMentionTargets({
+      memberships: memberships.data.flatMap((membership) => {
+        const userData = membership.publicUserData;
+
+        if (!userData) {
+          return [];
+        }
+
+        return [
+          {
+            userId: userData.userId,
+            identifier: userData.identifier,
+            firstName: userData.firstName,
+            lastName: userData.lastName,
+          },
+        ];
+      }),
+      users: mentionedUsers.data.map((user) => ({
+        id: user.id,
+        username: user.username,
+        firstName: user.firstName,
+        lastName: user.lastName,
+      })),
+    });
+
+    return getMentionedProjectMembers({
+      mentionedUsernames: usernames,
+      authorId,
+      members,
+    });
+  } catch (error) {
+    Sentry.logger.warn("Failed to resolve project mention recipients", {
+      orgId,
+      mentionedUsernames: usernames,
+      error:
+        error instanceof Error
+          ? { name: error.name, message: error.message }
+          : { message: String(error) },
+    });
+
+    return [];
+  }
 }
 
 async function ensureEditableBlock(blockId: string, orgId: string, userId: string) {
@@ -158,11 +251,22 @@ export const projectsRouter = createTRPCRouter({
                   },
                 },
               },
+              comments: {
+                orderBy: { createdAt: "desc" },
+                take: 50,
+              },
             },
           },
           exports: {
             orderBy: { createdAt: "desc" },
             take: 5,
+          },
+          notifications: {
+            where: {
+              recipientUserId: ctx.userId,
+            },
+            orderBy: { createdAt: "desc" },
+            take: 20,
           },
         },
       });
@@ -570,6 +674,54 @@ export const projectsRouter = createTRPCRouter({
       }
     }),
 
+  restoreBlockGeneration: orgProcedure
+    .input(
+      z.object({
+        blockId: z.string().min(1),
+        historyId: z.string().min(1),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      await ensureEditableBlock(input.blockId, ctx.orgId, ctx.userId);
+
+      const history = await prisma.projectBlockGeneration.findFirst({
+        where: {
+          id: input.historyId,
+          blockId: input.blockId,
+          block: {
+            project: {
+              orgId: ctx.orgId,
+            },
+          },
+        },
+        include: {
+          generation: {
+            select: {
+              id: true,
+              text: true,
+              voiceId: true,
+            },
+          },
+        },
+      });
+
+      if (!history) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Audio history item not found.",
+        });
+      }
+
+      return prisma.projectBlock.update({
+        where: { id: input.blockId },
+        data: {
+          ...getRestoreProjectBlockGenerationData(history.generation),
+          revision: { increment: 1 },
+          lockExpiresAt: getLockExpiry(),
+        },
+      });
+    }),
+
   reorderBlocks: orgProcedure
     .input(
       z.object({
@@ -829,6 +981,21 @@ export const projectsRouter = createTRPCRouter({
       }
     }),
 
+  clearFailedProjectExports: orgProcedure
+    .input(z.object({ projectId: z.string().min(1) }))
+    .mutation(async ({ input, ctx }) => {
+      const result = await prisma.projectExport.deleteMany({
+        where: getFailedProjectExportDeleteWhere({
+          projectId: input.projectId,
+          orgId: ctx.orgId,
+        }),
+      });
+
+      return {
+        deletedCount: result.count,
+      };
+    }),
+
   deleteBlock: orgProcedure
     .input(
       z.object({
@@ -852,6 +1019,115 @@ export const projectsRouter = createTRPCRouter({
 
       return prisma.projectBlock.delete({
         where: { id: input.blockId },
+      });
+    }),
+
+  createBlockComment: orgProcedure
+    .input(
+      z.object({
+        blockId: z.string().min(1),
+        body: z.string().trim().min(1).max(1000),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      const block = await prisma.projectBlock.findFirst({
+        where: {
+          id: input.blockId,
+          project: {
+            orgId: ctx.orgId,
+          },
+        },
+        select: { id: true, projectId: true },
+      });
+
+      if (!block) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+
+      const authorName = await getCommentAuthorName(ctx.userId);
+      const commentData = getProjectCommentCreateData({
+        blockId: block.id,
+        orgId: ctx.orgId,
+        authorId: ctx.userId,
+        authorName,
+        body: input.body,
+      });
+      const mentionRecipients = await getMentionedOrganizationMembers({
+        orgId: ctx.orgId,
+        authorId: ctx.userId,
+        mentionedUsernames: commentData.mentionedUsernames,
+      });
+
+      return prisma.$transaction(async (tx) => {
+        const comment = await tx.projectComment.create({
+          data: commentData,
+        });
+
+        const notifications = getProjectMentionNotificationCreateManyData({
+          orgId: ctx.orgId,
+          projectId: block.projectId,
+          blockId: block.id,
+          commentId: comment.id,
+          actorUserId: ctx.userId,
+          actorName: authorName,
+          commentBody: comment.body,
+          recipients: mentionRecipients,
+        });
+
+        if (notifications.length > 0) {
+          await tx.projectNotification.createMany({
+            data: notifications,
+          });
+        }
+
+        return comment;
+      });
+    }),
+
+  markProjectNotificationsRead: orgProcedure
+    .input(z.object({ projectId: z.string().min(1) }))
+    .mutation(async ({ input, ctx }) => {
+      const result = await prisma.projectNotification.updateMany({
+        where: {
+          orgId: ctx.orgId,
+          projectId: input.projectId,
+          recipientUserId: ctx.userId,
+          isRead: false,
+        },
+        data: {
+          isRead: true,
+          readAt: new Date(),
+        },
+      });
+
+      return {
+        updatedCount: result.count,
+      };
+    }),
+
+  setBlockCommentResolved: orgProcedure
+    .input(
+      z.object({
+        commentId: z.string().min(1),
+        isResolved: z.boolean(),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      const comment = await prisma.projectComment.findFirst({
+        where: {
+          id: input.commentId,
+          orgId: ctx.orgId,
+        },
+        select: { id: true },
+      });
+
+      if (!comment) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+
+      return prisma.projectComment.update({
+        where: { id: comment.id },
+        data: { isResolved: input.isResolved },
       });
     }),
 

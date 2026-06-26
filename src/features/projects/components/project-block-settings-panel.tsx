@@ -1,15 +1,21 @@
 "use client";
 
+import { type FormEvent, useState } from "react";
 import type { inferRouterOutputs } from "@trpc/server";
 import {
+  AtSign,
   AudioLines,
+  CheckCircle2,
   Clock,
   Download,
   History,
   Lock,
+  MessageCircle,
   Music2,
+  RotateCcw,
   Settings,
   Sparkles,
+  Trash2,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -26,8 +32,15 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import { VoiceAvatar } from "@/components/voice-avatar/voice-avatar";
 import { getProjectBlockAudioStateLabel } from "@/features/projects/lib/project-audio-state";
+import type { ProjectCommentMentionSuggestion } from "@/features/projects/lib/project-comments";
+import {
+  formatProjectExportDuration,
+  getFailedProjectExportCount,
+  getProjectExportVersionLabel,
+} from "@/features/projects/lib/project-export-history";
 import { VOICE_CATEGORY_LABELS } from "@/features/voices/data/voice-categories";
 import { cn } from "@/lib/utils";
 import type { AppRouter } from "@/trpc/routers/_app";
@@ -68,6 +81,16 @@ export function ProjectBlockSettingsPanel({
   onSelectBlock,
   onVoiceChange,
   onGenerate,
+  onRestoreGeneration,
+  canExportProjectAudio,
+  isExportingProjectAudio,
+  isClearingFailedExports,
+  isCommentActionPending,
+  mentionSuggestions,
+  onExportProjectAudio,
+  onClearFailedExports,
+  onCreateComment,
+  onSetCommentResolved,
 }: {
   project: Project;
   selectedBlock: ProjectBlock | null;
@@ -79,12 +102,51 @@ export function ProjectBlockSettingsPanel({
   onSelectBlock: (blockId: string) => void;
   onVoiceChange: (blockId: string, voiceId: string) => void;
   onGenerate: (blockId: string) => void;
+  onRestoreGeneration: (blockId: string, historyId: string) => void;
+  canExportProjectAudio: boolean;
+  isExportingProjectAudio: boolean;
+  isClearingFailedExports: boolean;
+  isCommentActionPending: boolean;
+  mentionSuggestions: ProjectCommentMentionSuggestion[];
+  onExportProjectAudio: () => void;
+  onClearFailedExports: () => void;
+  onCreateComment: (blockId: string, body: string) => void;
+  onSetCommentResolved: (commentId: string, isResolved: boolean) => void;
 }) {
+  const [commentBody, setCommentBody] = useState("");
   const allVoices = [...voices.custom, ...voices.system];
   const selectedVoice =
     selectedBlock?.voice ?? findVoice(allVoices, selectedBlock?.voiceId ?? null);
   const canGenerate =
     Boolean(selectedBlock?.voiceId) && isEditingSelectedBlock && !isBusy;
+  const latestExport = project.exports[0] ?? null;
+  const latestExportIsOutdated =
+    latestExport?.status === "READY" && !latestExport.isLatest;
+  const failedExportCount = getFailedProjectExportCount(project.exports);
+  const selectedComments = selectedBlock?.comments ?? [];
+  const unresolvedCommentCount = selectedComments.filter(
+    (comment) => !comment.isResolved,
+  ).length;
+
+  const handleCreateComment = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!selectedBlock || !commentBody.trim()) {
+      return;
+    }
+
+    onCreateComment(selectedBlock.id, commentBody);
+    setCommentBody("");
+  };
+
+  const handleAddMention = (username: string) => {
+    setCommentBody((currentBody) => {
+      const body = currentBody.trimEnd();
+      const prefix = body ? `${body} ` : "";
+
+      return `${prefix}@${username} `;
+    });
+  };
 
   return (
     <aside
@@ -101,6 +163,10 @@ export function ProjectBlockSettingsPanel({
           <TabsTrigger value="settings" className={tabTriggerClassName}>
             <Settings className="size-4" />
             Settings
+          </TabsTrigger>
+          <TabsTrigger value="comments" className={tabTriggerClassName}>
+            <MessageCircle className="size-4" />
+            Comments
           </TabsTrigger>
           <TabsTrigger value="history" className={tabTriggerClassName}>
             <History className="size-4" />
@@ -286,18 +352,179 @@ export function ProjectBlockSettingsPanel({
         </TabsContent>
 
         <TabsContent
+          value="comments"
+          className="mt-0 flex min-h-0 flex-1 flex-col overflow-y-auto"
+        >
+          {!selectedBlock ? (
+            <div className="flex flex-1 flex-col items-center justify-center gap-2 p-8 text-center">
+              <div className="rounded-full bg-muted p-3">
+                <MessageCircle className="size-5 text-muted-foreground" />
+              </div>
+              <p className="font-semibold tracking-tight">Select a block</p>
+              <p className="max-w-56 text-sm text-muted-foreground">
+                Comments are attached to the selected script block.
+              </p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-4 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold">Block comments</p>
+                  <p className="line-clamp-2 text-sm text-muted-foreground">
+                    {selectedBlock.text}
+                  </p>
+                </div>
+                <Badge variant={unresolvedCommentCount > 0 ? "secondary" : "outline"}>
+                  {unresolvedCommentCount} open
+                </Badge>
+              </div>
+
+              <form onSubmit={handleCreateComment} className="flex flex-col gap-3">
+                <Textarea
+                  value={commentBody}
+                  onChange={(event) => setCommentBody(event.target.value)}
+                  placeholder="Add a comment..."
+                  className="min-h-24"
+                />
+                {mentionSuggestions.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {mentionSuggestions.map((suggestion) => (
+                      <Button
+                        key={suggestion.id}
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={isCommentActionPending}
+                        onClick={() => handleAddMention(suggestion.username)}
+                      >
+                        <AtSign className="size-4" />
+                        {suggestion.username}
+                      </Button>
+                    ))}
+                  </div>
+                )}
+                <div className="flex justify-end">
+                  <Button
+                    type="submit"
+                    size="sm"
+                    disabled={isCommentActionPending || !commentBody.trim()}
+                  >
+                    <MessageCircle className="size-4" />
+                    Comment
+                  </Button>
+                </div>
+              </form>
+
+              {selectedComments.length === 0 ? (
+                <div className="rounded-md border border-dashed bg-muted/30 p-4 text-sm text-muted-foreground">
+                  No comments yet.
+                </div>
+              ) : (
+                <div className="flex flex-col gap-3">
+                  {selectedComments.map((comment) => (
+                    <div key={comment.id} className="rounded-lg border p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium">
+                            {comment.authorName}
+                          </p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {new Date(comment.createdAt).toLocaleString()}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <Badge
+                            variant={comment.isResolved ? "outline" : "secondary"}
+                          >
+                            {comment.isResolved ? "Resolved" : "Open"}
+                          </Badge>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={isCommentActionPending}
+                            onClick={() =>
+                              onSetCommentResolved(
+                                comment.id,
+                                !comment.isResolved,
+                              )
+                            }
+                          >
+                            <CheckCircle2 className="size-4" />
+                            {comment.isResolved ? "Reopen" : "Resolve"}
+                          </Button>
+                        </div>
+                      </div>
+
+                      <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
+                        {comment.body}
+                      </p>
+
+                      {comment.mentionedUsernames.length > 0 && (
+                        <div className="mt-3 flex flex-wrap gap-1.5">
+                          {comment.mentionedUsernames.map((username) => (
+                            <Badge key={username} variant="outline">
+                              @{username}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </TabsContent>
+
+        <TabsContent
           value="history"
           className="mt-0 flex min-h-0 flex-1 flex-col overflow-y-auto"
         >
           <div className="flex flex-col gap-4 p-2">
             <div className="flex flex-col gap-1">
               <div className="px-2 py-2">
-                <p className="text-sm font-semibold">Project exports</p>
-                <p className="text-xs text-muted-foreground">
-                  {project.exports.length} export
-                  {project.exports.length === 1 ? "" : "s"} saved for this
-                  project.
-                </p>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold">Project exports</p>
+                    <p className="text-xs text-muted-foreground">
+                      {project.exports.length} export
+                      {project.exports.length === 1 ? "" : "s"} saved for this
+                      project.
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                    {failedExportCount > 0 && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={isClearingFailedExports}
+                        onClick={onClearFailedExports}
+                      >
+                        <Trash2 className="size-4" />
+                        {isClearingFailedExports
+                          ? "Clearing..."
+                          : `Clear failed (${failedExportCount})`}
+                      </Button>
+                    )}
+                    {latestExportIsOutdated && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={
+                          !canExportProjectAudio || isExportingProjectAudio
+                        }
+                        onClick={onExportProjectAudio}
+                      >
+                        <Download className="size-4" />
+                        {isExportingProjectAudio
+                          ? "Exporting..."
+                          : "Export again"}
+                      </Button>
+                    )}
+                  </div>
+                </div>
               </div>
 
               {project.exports.length === 0 ? (
@@ -318,23 +545,38 @@ export function ProjectBlockSettingsPanel({
                         <p className="mt-1 text-xs text-muted-foreground">
                           {new Date(projectExport.createdAt).toLocaleString()}
                         </p>
+                        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                          <span>
+                            {formatProjectExportDuration(
+                              projectExport.durationMs,
+                            )}
+                          </span>
+                          <span>&middot;</span>
+                          <span>{projectExport.contentType}</span>
+                        </div>
                       </div>
                       <div className="flex shrink-0 flex-col items-end gap-1">
                         <Badge variant="outline">{projectExport.status}</Badge>
-                        {projectExport.status === "READY" && (
-                          <Badge
-                            variant={
-                              projectExport.isLatest ? "secondary" : "outline"
-                            }
-                          >
-                            {projectExport.isLatest ? "Latest" : "Outdated"}
-                          </Badge>
-                        )}
+                        <Badge
+                          variant={
+                            projectExport.status === "READY" &&
+                            projectExport.isLatest
+                              ? "secondary"
+                              : projectExport.status === "FAILED"
+                                ? "destructive"
+                                : "outline"
+                          }
+                        >
+                          {getProjectExportVersionLabel({
+                            status: projectExport.status,
+                            isLatest: projectExport.isLatest,
+                          })}
+                        </Badge>
                       </div>
                     </div>
 
                     {projectExport.errorMessage && (
-                      <p className="mt-2 text-xs text-destructive">
+                      <p className="mt-2 line-clamp-2 rounded-md bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
                         {projectExport.errorMessage}
                       </p>
                     )}
@@ -379,20 +621,39 @@ export function ProjectBlockSettingsPanel({
                         <p className="text-xs text-muted-foreground">
                           {new Date(history.createdAt).toLocaleString()}
                         </p>
-                        <Badge
-                          variant={
-                            history.isCurrent &&
-                            selectedBlock.audioState === "STALE"
-                              ? "destructive"
-                              : "outline"
-                          }
-                        >
-                          {history.isCurrent
-                            ? getProjectBlockAudioStateLabel(
-                                selectedBlock.audioState,
-                              )
-                            : "Previous"}
-                        </Badge>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <Badge
+                            variant={
+                              history.isCurrent &&
+                              selectedBlock.audioState === "STALE"
+                                ? "destructive"
+                                : "outline"
+                            }
+                          >
+                            {history.isCurrent
+                              ? getProjectBlockAudioStateLabel(
+                                  selectedBlock.audioState,
+                                )
+                              : "Previous"}
+                          </Badge>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={
+                              !isEditingSelectedBlock ||
+                              isBusy ||
+                              (history.isCurrent &&
+                                selectedBlock.audioState === "CURRENT")
+                            }
+                            onClick={() =>
+                              onRestoreGeneration(selectedBlock.id, history.id)
+                            }
+                          >
+                            <RotateCcw className="size-4" />
+                            Restore
+                          </Button>
+                        </div>
                       </div>
                       <ProjectAudioPreview
                         audioUrl={history.generation.audioUrl}

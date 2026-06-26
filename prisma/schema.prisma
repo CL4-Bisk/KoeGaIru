@@ -47,6 +47,10 @@ enum ProjectExportStatus {
   FAILED
 }
 
+enum ProjectNotificationType {
+  COMMENT_MENTION
+}
+
 model Voice {
   id String @id @default(cuid())
 
@@ -103,8 +107,9 @@ model Project {
   name        String
   description String?
 
-  blocks ProjectBlock[]
-  exports ProjectExport[]
+  blocks        ProjectBlock[]
+  exports       ProjectExport[]
+  notifications ProjectNotification[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -138,6 +143,7 @@ model ProjectBlock {
   generation   Generation? @relation("CurrentProjectBlockGeneration", fields: [generationId], references: [id], onDelete: SetNull)
 
   generationHistory ProjectBlockGeneration[]
+  comments          ProjectComment[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -147,6 +153,64 @@ model ProjectBlock {
   @@index([generationId])
   @@index([lockOwnerId])
   @@index([lockExpiresAt])
+}
+
+model ProjectComment {
+  id String @id @default(cuid())
+
+  orgId String
+
+  blockId String
+  block   ProjectBlock @relation(fields: [blockId], references: [id], onDelete: Cascade)
+
+  authorId   String
+  authorName String
+
+  body               String
+  mentionedUsernames String[] @default([])
+  isResolved         Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orgId])
+  @@index([blockId, createdAt])
+  @@index([authorId])
+  @@index([isResolved])
+}
+
+model ProjectNotification {
+  id String @id @default(cuid())
+
+  orgId String
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  blockId   String
+  commentId String
+
+  recipientUserId   String
+  recipientUsername String
+
+  actorUserId String
+  actorName   String
+
+  type ProjectNotificationType @default(COMMENT_MENTION)
+
+  title String
+  body  String
+
+  isRead Boolean   @default(false)
+  readAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orgId])
+  @@index([projectId])
+  @@index([recipientUserId, isRead, createdAt])
+  @@index([commentId])
 }
 
 model ProjectBlockGeneration {
